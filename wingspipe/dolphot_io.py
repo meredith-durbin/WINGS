@@ -17,7 +17,10 @@ from pathlib import Path
 from typing import Optional
 
 class DolphotOutput:
-    def __init__(self, photpath : str | os.PathLike):
+    def __init__(self, photpath : str | os.PathLike, 
+                 paramfile : Optional[str | os.PathLike] = None,
+                 refimage : Optional[str | os.PathLike] = None,
+                 ):
         '''
         Populate output file names based on path to photometry ascii file.
         '''
@@ -31,6 +34,10 @@ class DolphotOutput:
         self.infofile = f'{self.photfile}.info'
         self.psfsfile = f'{self.photfile}.psfs'
         self.warnfile = f'{self.photfile}.warnings'
+        self.paramfile = paramfile
+        self.refimage = refimage
+        self.column_info = None
+        self.phot_table = None
         
     def get_path(self, attr_name: str) -> os.PathLike | None:
         full_path = self.basedir.joinpath(getattr(self, attr_name))
@@ -40,6 +47,60 @@ class DolphotOutput:
                 print(f'Cannot locate file: {full_path}')
                 return None
         return full_path
+    
+    def read_photfile(self, keep_exposure_cols : bool = True, 
+                      add_wcs : bool = True, xcol : str = 'X', ycol : str = 'Y',
+                      add_id : bool = True, id_precision : int = 5,
+                      do_culling : bool = True, param_dict : Optional[dict] = None,):
+        '''Read in DOLPHOT ascii photometry file to vaex dataframe.
+
+        Inputs
+        ------
+        keep_exposure_cols : bool, default False
+            Keep all columns with measurements for individual exposures?
+        refimage : str or path-like object, optional
+            Path to reference image FITS file with WCS specification
+        xcol : str, default "X"
+            Column with reference image x-coordinate values. Only used if 
+            `refimage` is not `None`.
+        ycol : str, default "Y"
+            Column with reference image y-coordinate values. Only used if 
+            `refimage` is not `None`.
+        do_culling : bool, default True
+            Add columns with ST and GST quality flags?
+        param_dict : dict or None, optional
+            Dictionary of parameters to be used in culling step. Only used if
+            `do_culling` is `True`.
+            
+        Returns
+        -------
+        ds : vaex.dataframe.DataFrame
+            Vaex dataframe of photometry.
+        '''
+        df_col = self._read_colfile(self.get_path('colfile'))
+        ds = self._read_photfile(self.get_path('photfile'), df_col, 
+                                 keep_exposure_cols=keep_exposure_cols)
+        if add_wcs:
+            if (self.refimage is None) and (self.paramfile is None):
+                print('No reference image or parameter file specified')
+            else:
+                ra, dec = self._calc_wcs(ds, refimage=self.get_path('refimage'), 
+                                         xcol=xcol, ycol=ycol)
+                col_order = ds.get_column_names(virtual=True, hidden=False)
+                y_idx = col_order.index(ycol) + 1
+                col_reorder = col_order[:y_idx] + ['RA', 'DEC'] + col_order[y_idx:]
+                if add_id:
+                    id_col = self._make_id_from_radec(ra, dec, precision=id_precision)
+                    col_reorder = ['ID'] + col_reorder
+                    ds.add_column('ID', id_col, dtype=id_col.dtype)
+                ds.add_column('RA', ra, dtype=ra.dtype)
+                ds.add_column('DEC', dec, dtype=dec.dtype)
+                ds = ds[col_reorder]
+        if do_culling:
+            ds = self._cull_photometry(ds, param_dict=param_dict)
+        self.column_info = df_col
+        self.phot_table = ds
+        return self
     
     @staticmethod
     def _read_colfile(colfile : str | os.PathLike) -> pd.DataFrame:
@@ -100,6 +161,7 @@ class DolphotOutput:
         # "<quantity>, <filename> (<filter>, <exptime>)"
         is_single = df_col['description'].str.split(re.escape(' (')).str[0].\
             str.contains(re.escape(', '))
+        df_col['is_single_image'] = is_single
         df_single = df_col.loc[is_single]
         # all other columns (XY position, object type, combined magnitudes, etc)
         df_global = df_col.drop(df_single.index)
@@ -139,15 +201,12 @@ class DolphotOutput:
         df_col['na_values'] = ''
         for k, v in na_values.items():
             df_col.loc[df_col.filter(regex=f'.*\\_{k}$', axis=0).index, 'na_values'] = v
-        df_col['in_orig_ascii'] = True
+        df_col['in_ascii'] = True
         return df_col
     
     @staticmethod
     def _read_photfile(photfile : str | os.PathLike, df_col : pd.DataFrame, 
                        keep_exposure_cols : bool = True, 
-                       refimage : Optional[str | os.PathLike] = None, 
-                       xcol : str = 'X', ycol : str = 'Y',
-                       do_culling : bool = True, param_dict : Optional[dict] = None,
                        ) -> vaex.dataframe.DataFrame:
         '''Read in DOLPHOT ascii photometry file to vaex dataframe.
 
@@ -159,19 +218,6 @@ class DolphotOutput:
             Table of column information, such as from DolphotOutput.read_colfile
         keep_exposure_cols : bool, default False
             Keep all columns with measurements for individual exposures?
-        refimage : str or path-like object, optional
-            Optional path to reference image FITS file with WCS specification
-        xcol : str, default "X"
-            Column with reference image x-coordinate values. Only used if 
-            `refimage` is not `None`.
-        ycol : str, default "Y"
-            Column with reference image y-coordinate values. Only used if 
-            `refimage` is not `None`.
-        do_culling : bool, default True
-            Add columns with ST and GST quality flags?
-        param_dict : dict or None, optional
-            Dictionary of parameters to be used in culling step. Only used if
-            `do_culling` is `True`.
             
         Returns
         -------
@@ -179,15 +225,11 @@ class DolphotOutput:
             Vaex dataframe of photometry.
         '''
         if not keep_exposure_cols:
-            df_col = df_col[~df_col.index.str.contains('chip[0-9]')]
+            df_col = df_col.loc[df_col['is_single_image'] == False]
         ds = vaex.from_csv(photfile, copy_index=False, sep=r'\s+',
                            names=df_col.index.tolist(), usecols=df_col['num'].tolist(),
                            na_values=df_col['na_values'].to_dict(),
                            dtype=df_col['dtype'].to_dict())
-        if refimage is not None:
-            ds = DolphotOutput._add_wcs(ds, refimage=refimage, xcol=xcol, ycol=ycol)
-        if do_culling:
-            ds = DolphotOutput._cull_photometry(ds, param_dict=param_dict)
         return ds
     
     @staticmethod
@@ -225,12 +267,11 @@ class DolphotOutput:
                 is_mag_in = df_col['suffix'].eq('MAG_IN')
                 df_col.loc[is_mag_in, 'name'] = df_col['prefix'].str.cat(df_col['suffix'], sep='_').loc[is_mag_in]
             df_col = df_col.drop_duplicates(subset=['name'], keep='first')
-        # df_col = df_col[~df_col.index.duplicated(keep='first')]
         return df_col.set_index('name')
     
     @staticmethod
-    def _add_wcs(ds : vaex.dataframe.DataFrame, refimage : str | os.PathLike, 
-                 xcol : str = 'X', ycol : str = 'Y') -> vaex.dataframe.DataFrame:
+    def _calc_wcs(ds : vaex.dataframe.DataFrame, refimage : str | os.PathLike, 
+                  xcol : str = 'X', ycol : str = 'Y') -> vaex.dataframe.DataFrame:
         '''Convert X and Y columns to world coordinates with refimage WCS.
         
         Inputs
@@ -246,25 +287,21 @@ class DolphotOutput:
 
         Returns
         -------
-        ds : vaex.dataframe.DataFrame
-            Photometry table with RA and Dec columns inserted after `ycol`.
+        ra, dec : tuple of arrays
+            1D arrays of RA and Dec values in degrees.
         '''
         from astropy.io import fits
         from astropy.wcs import WCS
         # need more robust way of getting right WCS here
         with fits.open(refimage, mode='readonly', memmap=False) as f:
-            if ('chip' in refimage) or ('wcs' in refimage):
+            if ('chip' in f.filename()) or ('wcs' in f.filename()):
                 w = WCS(f[0].header, fobj=f)
             else:
                 w = WCS(f[1].header, fobj=f)
-        col_order = ds.get_column_names(virtual=True, hidden=False)
-        y_idx = col_order.index(ycol)+1
-        col_reorder = col_order[:y_idx] + ['RA', 'DEC'] + col_order[y_idx:]
-        # dolphot pixel coordinates are half a pixel off from everything else
-        ra, dec = w.all_pix2world(*ds.evaluate([f'{xcol}-0.5', f'{ycol}-0.5'], array_type='numpy'), 0, ra_dec_order=True)
-        ds.add_column('RA', ra)
-        ds.add_column('DEC', dec)
-        return ds[col_reorder]
+        # dolphot pixel coordinates are half a pixel off from every other convention
+        ra, dec = w.all_pix2world(*ds.evaluate([f'{xcol}-0.5', f'{ycol}-0.5'], array_type='numpy'), 
+                                  0, ra_dec_order=True)
+        return ra, dec
     
     @staticmethod
     def _make_id_from_radec(ra : np.typing.ArrayLike, dec : np.typing.ArrayLike,
@@ -282,8 +319,10 @@ class DolphotOutput:
         '''
         from astropy.coordinates import SkyCoord
         coo = SkyCoord(ra, dec, unit='deg', frame='icrs')
-        ra_str = coo.ra.to_string(unit=u.hourangle, decimal=False, sep='', precision=precision, pad=True)
-        de_str = coo.dec.to_string(unit=u.deg, decimal=False, sep='', precision=precision, pad=True, alwayssign=True)
+        ra_str = coo.ra.to_string(unit='hourangle', decimal=False, sep='', 
+                                  precision=precision, pad=True)
+        de_str = coo.dec.to_string(unit='deg', decimal=False, sep='', 
+                                   precision=precision, pad=True, alwayssign=True)
         id_str = 'J' + pd.Series(ra_str).str.cat(pd.Series(de_str), sep='')
         return id_str.to_numpy().astype('str')
     
