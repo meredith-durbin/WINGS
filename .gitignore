@@ -24,3 +24,6 @@ docs/source/_templates
 
 # Ignore pycharm directory
 .idea
+
+# Apple
+*DS_Store
