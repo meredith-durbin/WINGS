@@ -20,6 +20,7 @@ class DolphotOutput:
     def __init__(self, photpath : str | os.PathLike, 
                  paramfile : Optional[str | os.PathLike] = None,
                  refimage : Optional[str | os.PathLike] = None,
+                 fakephot : Optional[str | os.PathLike] = None,
                  ):
         '''
         Populate output file names based on path to photometry ascii file.
@@ -36,9 +37,13 @@ class DolphotOutput:
         self.warnfile = f'{self.photfile}.warnings'
         self.paramfile = paramfile
         self.refimage = refimage
+        self.fakephotfile = fakephotfile
         self.column_info = None
         self.phot_table = None
-        
+        self.fake_column_info = None
+        self.fake_table = None
+        self.header_table = None
+            
     def get_path(self, attr_name: str) -> os.PathLike | None:
         full_path = self.basedir.joinpath(getattr(self, attr_name))
         if not full_path.is_file():
@@ -47,42 +52,52 @@ class DolphotOutput:
                 print(f'Cannot locate file: {full_path}')
                 return None
         return full_path
-    
-    def read_photfile(self, keep_exposure_cols : bool = True, 
-                      add_wcs : bool = True, xcol : str = 'X', ycol : str = 'Y',
-                      add_id : bool = True, id_precision : int = 5,
-                      do_culling : bool = True, param_dict : Optional[dict] = None,):
+
+    def read_ascii_phot(self, keep_exposure_cols : bool = True, 
+                        fake : bool = False, trim_fake_input_cols : bool = True, 
+                        add_wcs : bool = True, xcol : str = 'X', ycol : str = 'Y',
+                        add_id : bool = True, id_precision : int = 5,
+                        do_culling : bool = True, param_dict : Optional[dict] = None,):
         '''Read in DOLPHOT ascii photometry file to vaex dataframe.
 
         Inputs
         ------
         keep_exposure_cols : bool, default False
             Keep all columns with measurements for individual exposures?
-        refimage : str or path-like object, optional
-            Path to reference image FITS file with WCS specification
+        fake : bool, default False
+            Whether the photometry file to be read in is an AST output.
+        trim_input_cols : bool, default True
+            Whether to keep only one AST input column per filter instead of per
+            image. Assumes all input magnitudes are the same across all images 
+            in a given filter. Only used if `fake` is True.
+        add_wcs : bool, default True
+            Whether to add RA and Dec columns if reference image is available
         xcol : str, default "X"
             Column with reference image x-coordinate values. Only used if 
-            `refimage` is not `None`.
+            `add_wcs` is True.
         ycol : str, default "Y"
             Column with reference image y-coordinate values. Only used if 
-            `refimage` is not `None`.
+            `add_wcs` is True.
+        add_id : bool, default True
+            Whether to add ID column based on world coordinates. Only used if 
+            `add_wcs` is also True.
+        id_precision : int, default 5
+            Decimal precision of the last place of sexagesimal notation in the 
+            ID string.
         do_culling : bool, default True
             Add columns with ST and GST quality flags?
-        param_dict : dict or None, optional
+        param_dict : dict or None, default None
             Dictionary of parameters to be used in culling step. Only used if
             `do_culling` is `True`.
-            
-        Returns
-        -------
-        ds : vaex.dataframe.DataFrame
-            Vaex dataframe of photometry.
         '''
-        df_col = self._read_colfile(self.get_path('colfile'))
-        ds = self._read_photfile(self.get_path('photfile'), df_col, 
-                                 keep_exposure_cols=keep_exposure_cols)
+        df_col = self._read_colfile(self.get_path('colfile')) if self.column_info is None else self.column_info
+        if fake:
+            df_col = self._add_fake_input_cols(df_col, trim_input_cols=trim_input_cols)
+        ascii_path = self.get_path('fakephotfile') if fake else self.get_path('photfile')
+        ds = self._read_photfile(ascii_path, df_col, keep_exposure_cols=keep_exposure_cols)
         if add_wcs:
-            if (self.refimage is None) and (self.paramfile is None):
-                print('No reference image or parameter file specified')
+            if (self.refimage is None):
+                print('No reference image specified; skipping WCS step')
             else:
                 ra, dec = self._calc_wcs(ds, refimage=self.get_path('refimage'), 
                                          xcol=xcol, ycol=ycol)
@@ -98,8 +113,12 @@ class DolphotOutput:
                 ds = ds[col_reorder]
         if do_culling:
             ds = self._cull_photometry(ds, param_dict=param_dict)
-        self.column_info = df_col
-        self.phot_table = ds
+        if fake:
+            self.fake_column_info = df_col
+            self.fake_table = ds
+        else:
+            self.column_info = df_col
+            self.phot_table = ds
         return self
     
     @staticmethod
@@ -233,7 +252,8 @@ class DolphotOutput:
         return ds
     
     @staticmethod
-    def _add_fake_input_cols(df_col : pd.DataFrame, trim_input_cols : bool = True):
+    def _add_fake_input_cols(df_col : pd.DataFrame, trim_input_cols : bool = True,
+                             ) -> pd.DataFrame:
         '''Add columns corresponding to AST inputs to column dataframe.
         
         Inputs
@@ -271,7 +291,8 @@ class DolphotOutput:
     
     @staticmethod
     def _calc_wcs(ds : vaex.dataframe.DataFrame, refimage : str | os.PathLike, 
-                  xcol : str = 'X', ycol : str = 'Y') -> vaex.dataframe.DataFrame:
+                  xcol : str = 'X', ycol : str = 'Y',
+                  ) -> tuple(np.typing.ArrayLike, np.typing.ArrayLike):
         '''Convert X and Y columns to world coordinates with refimage WCS.
         
         Inputs
@@ -305,7 +326,7 @@ class DolphotOutput:
     
     @staticmethod
     def _make_id_from_radec(ra : np.typing.ArrayLike, dec : np.typing.ArrayLike,
-                            precision : int = 5):
+                            precision : int = 5) -> np.typing.ArrayLike:
         '''Make string ID from RA and Dec arrays.
         
         Inputs
