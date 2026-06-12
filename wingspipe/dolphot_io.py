@@ -1,9 +1,12 @@
 #!/usr/bin/env python
 
 """Tools to interact with DOLPHOT ascii outputs.
+
+TODO: 
+- add narwhal, polars, astropy table support
+- update df_col when new columns added
 """
 
-import argparse
 import glob
 import numpy as np
 import os
@@ -11,7 +14,7 @@ import pandas as pd
 import re
 import time
 import traceback
-import vaex
+# import vaex
 
 from pathlib import Path
 from typing import Optional
@@ -20,10 +23,24 @@ class DolphotOutput:
     def __init__(self, photpath : str | os.PathLike, 
                  paramfile : Optional[str | os.PathLike] = None,
                  refimage : Optional[str | os.PathLike] = None,
-                 fakephot : Optional[str | os.PathLike] = None,
+                 fakephotfile : Optional[str | os.PathLike] = None,
                  ):
         '''
         Populate output file names based on path to photometry ascii file.
+        
+        Inputs
+        ------
+        photpath : path-like
+            Path to DOLPHOT ascii photometry table. Assumes all other outputs 
+            are in the same directory with the same base name, as DOLPHOT does 
+            by default.
+        paramfile : path-like or None, default None
+            Path to input parameter file used in DOLPHOT run.
+        refimage : path-like or None, default None
+            Path to astrometric reference image used in DOLPHOT run.
+            Currently expects FITS format.
+        fakephotfile : path-like or None, default None
+            Path to artificial star output file, if ASTs have been run.            
         '''
         absphotpath = Path(photpath).absolute()
         self.basename = absphotpath.stem
@@ -36,6 +53,8 @@ class DolphotOutput:
         self.psfsfile = f'{self.photfile}.psfs'
         self.warnfile = f'{self.photfile}.warnings'
         self.paramfile = paramfile
+        if (refimage is None) and (paramfile is not None):
+            refimage = self._get_refimage_from_param(paramfile)
         self.refimage = refimage
         self.fakephotfile = fakephotfile
         self.column_info = None
@@ -43,8 +62,10 @@ class DolphotOutput:
         self.fake_column_info = None
         self.fake_table = None
         self.header_table = None
-            
+    
     def get_path(self, attr_name: str) -> os.PathLike | None:
+        '''Get absolute path of attribute.
+        '''
         full_path = self.basedir.joinpath(getattr(self, attr_name))
         if not full_path.is_file():
             full_path = full_path + '.gz'
@@ -53,19 +74,29 @@ class DolphotOutput:
                 return None
         return full_path
 
-    def read_ascii_phot(self, keep_exposure_cols : bool = True, 
-                        fake : bool = False, trim_fake_input_cols : bool = True, 
-                        add_wcs : bool = True, xcol : str = 'X', ycol : str = 'Y',
-                        add_id : bool = True, id_precision : int = 5,
-                        do_culling : bool = True, param_dict : Optional[dict] = None,):
-        '''Read in DOLPHOT ascii photometry file to vaex dataframe.
+    def read_ascii_phot(self, 
+                        drop_exposure_cols : bool = False, 
+                        dataframe_type : str = 'pandas',
+                        fake : bool = False, 
+                        trim_input_cols : bool = True, 
+                        add_wcs : bool = True, 
+                        xcol : str = 'X', 
+                        ycol : str = 'Y',
+                        add_id : bool = True,
+                        id_precision : int = 4,
+                        do_culling : bool = True, 
+                        param_dict : Optional[dict] = None,):
+        '''Read in DOLPHOT ascii photometry file to dataframe.
 
         Inputs
         ------
-        keep_exposure_cols : bool, default False
-            Keep all columns with measurements for individual exposures?
+        drop_exposure_cols : bool, default False
+            Drop all columns with measurements for individual exposures?
+        dataframe_type : str, one of ['pandas', 'vaex', 'dask'], default 'pandas'
+            Library for reading in and storing photometry table.
         fake : bool, default False
-            Whether the photometry file to be read in is an AST output.
+            Whether the photometry file to be read in includes columns 
+            corresponding to artificial star test inputs.
         trim_input_cols : bool, default True
             Whether to keep only one AST input column per filter instead of per
             image. Assumes all input magnitudes are the same across all images 
@@ -81,45 +112,90 @@ class DolphotOutput:
         add_id : bool, default True
             Whether to add ID column based on world coordinates. Only used if 
             `add_wcs` is also True.
-        id_precision : int, default 5
+        id_precision : int, default 4
             Decimal precision of the last place of sexagesimal notation in the 
             ID string.
         do_culling : bool, default True
             Add columns with ST and GST quality flags?
         param_dict : dict or None, default None
             Dictionary of parameters to be used in culling step. Only used if
-            `do_culling` is `True`.
+            `do_culling` is True.
         '''
         df_col = self._read_colfile(self.get_path('colfile')) if self.column_info is None else self.column_info
         if fake:
             df_col = self._add_fake_input_cols(df_col, trim_input_cols=trim_input_cols)
+        if drop_exposure_cols:
+            df_col = df_col.query('is_single_image == False')
         ascii_path = self.get_path('fakephotfile') if fake else self.get_path('photfile')
-        ds = self._read_photfile(ascii_path, df_col, keep_exposure_cols=keep_exposure_cols)
+        try:
+            df = self._read_photfile(ascii_path, df_col, dataframe_type=dataframe_type)
+        except Exception:
+            print(f'failed to read {ascii_path}')
+            return self
         if add_wcs:
             if (self.refimage is None):
                 print('No reference image specified; skipping WCS step')
             else:
-                ra, dec = self._calc_wcs(ds, refimage=self.get_path('refimage'), 
+                if dataframe_type == 'dask':
+                    import dask.dataframe as dd
+                ra, dec = self._calc_wcs(df, refimage=self.get_path('refimage'), 
+                                         dataframe_type=dataframe_type,
                                          xcol=xcol, ycol=ycol)
-                col_order = ds.get_column_names(virtual=True, hidden=False)
+                if dataframe_type == 'vaex':
+                    col_order = df.get_column_names(virtual=True, hidden=False)
+                elif dataframe_type in ['pandas', 'dask']:
+                    col_order = df.columns.tolist()
                 y_idx = col_order.index(ycol) + 1
                 col_reorder = col_order[:y_idx] + ['RA', 'DEC'] + col_order[y_idx:]
                 if add_id:
                     id_col = self._make_id_from_radec(ra, dec, precision=id_precision)
                     col_reorder = ['ID'] + col_reorder
-                    ds.add_column('ID', id_col, dtype=id_col.dtype)
-                ds.add_column('RA', ra, dtype=ra.dtype)
-                ds.add_column('DEC', dec, dtype=dec.dtype)
-                ds = ds[col_reorder]
+                    if dataframe_type == 'vaex':
+                        df.add_column('ID', id_col, dtype=id_col.dtype)
+                    elif dataframe_type == 'pandas':
+                        df.insert(0, 'ID', id_col)
+                    elif dataframe_type == 'dask':
+                        print('ID assignment not yet implemented for dask dataframes')
+                        # df['ID'] = pd.Series(id_col, index=df.index).\
+                        #     pipe(dd.from_pandas, npartitions=df.npartitions)
+                if dataframe_type == 'vaex':
+                    df.add_column('RA', ra, dtype=ra.dtype)
+                    df.add_column('DEC', dec, dtype=dec.dtype)
+                elif dataframe_type == 'pandas':
+                    df.insert(y_idx, 'DEC', dec)
+                    df.insert(y_idx, 'RA', ra)
+                elif dataframe_type == 'dask':
+                    print('WCS assignment not yet implemented for dask dataframes')
+                    # df['RA'] = pd.Series(ra, index=df.index).\
+                    #     pipe(dd.from_pandas, npartitions=df.npartitions)
+                    # df['DEC'] = pd.Series(dec, index=df.index).\
+                    #     pipe(dd.from_pandas, npartitions=df.npartitions)
+                df = df[col_reorder]
         if do_culling:
-            ds = self._cull_photometry(ds, param_dict=param_dict)
+            df = self._cull_photometry(df, param_dict=param_dict, 
+                                       dataframe_type=dataframe_type)
         if fake:
             self.fake_column_info = df_col
-            self.fake_table = ds
+            self.fake_table = df
         else:
-            self.column_info = df_col
-            self.phot_table = ds
+            # self.column_info = df_col
+            self.phot_table = df
         return self
+    
+    @staticmethod
+    def _get_refimage_from_param(paramfile):
+        # needs work!!!
+        refimage = None
+        with open(paramfile, 'r') as f:
+            for line in f:
+                if line.startswith('img0_file'):
+                    refimage = line.split('=')[-1].strip()
+                    break
+        if refimage is None:
+            print(f'No reference image found in {paramfile}')
+        else:
+            refimage = glob.glob(refimage + '.*')[0]
+        return refimage
     
     @staticmethod
     def _read_colfile(colfile : str | os.PathLike) -> pd.DataFrame:
@@ -178,10 +254,13 @@ class DolphotOutput:
                              sep=re.escape('. '), engine='python').rename_axis('num')
         # select for single-exposure columns with descriptions formatted as
         # "<quantity>, <filename> (<filter>, <exptime>)"
-        is_single = df_col['description'].str.split(re.escape(' (')).str[0].\
+        is_single_filter = df_col['description'].str.split(re.escape(' (')).str[0].\
             str.contains(re.escape(', '))
-        df_col['is_single_image'] = is_single
-        df_single = df_col.loc[is_single]
+        single_image_regex = r'\([A-Z0-9]{1,9}\_[fF][0-9]{3,4}[a-zA-Z][0-9]?, [0-9]{1,5}\.[0-9]{1,4} sec\)$'
+        is_single_image = df_col['description'].str.contains(single_image_regex, regex=True)
+        df_col['is_single_filter'] = is_single_filter
+        df_col['is_single_image'] = is_single_image
+        df_single = df_col.loc[is_single_filter]
         # all other columns (XY position, object type, combined magnitudes, etc)
         df_global = df_col.drop(df_single.index)
 
@@ -213,20 +292,29 @@ class DolphotOutput:
         df_col = df_col.join(df_col['description'].str.extract(r'(?P<filt>[A-Z0-9]{1,9}\_[fF][0-9]{3,4}[a-zA-Z][0-9]?)'))
         df_col = df_col.reset_index().set_index('name')
         df_col['dtype'] = 'float32'
-        uint8_cols = df_col.filter(regex='^(EXT|CHIP|MAJAX|OBJTYPE)$|(.*_FLAG$)', axis=0).index
+        uint8_cols = df_col.filter(regex='^(EXT|CHIP|MAJAX|OBJTYPE|PASS)$|(.*_FLAG$)', axis=0).index
         df_col.loc[uint8_cols, 'dtype'] = 'uint8'
-        if 'PASS' in df_col.index:
-            df_col.loc['PASS', 'dtype'] = 'uint32' # some of the passes are huge numbers for some reason
+        # if 'PASS' in df_col.index:
+        #     df_col.loc['PASS', 'dtype'] = 'uint8'
+        # add null values
         df_col['na_values'] = ''
         for k, v in na_values.items():
             df_col.loc[df_col.filter(regex=f'.*\\_{k}$', axis=0).index, 'na_values'] = v
+        # add units
+        df_col['unit'] = ''
+        df_col.loc[['X', 'Y'], 'unit'] = 'pixel'
+        mag_cols = df_col.filter(regex='.*_(MAG|VEGA|TRANS|CROWD|ERR)$', axis=0).index
+        df_col.loc[mag_cols, 'unit'] = 'mag'
+        count_cols = df_col.filter(regex='.*_(COUNT|SKY)$', axis=0).index
+        df_col.loc[count_cols, 'unit'] = 'count'
         df_col['in_ascii'] = True
         return df_col
     
     @staticmethod
-    def _read_photfile(photfile : str | os.PathLike, df_col : pd.DataFrame, 
-                       keep_exposure_cols : bool = True, 
-                       ) -> vaex.dataframe.DataFrame:
+    def _read_photfile(photfile : str | os.PathLike, 
+                       df_col : pd.DataFrame, 
+                       dataframe_type : str = 'pandas',
+                       ):
         '''Read in DOLPHOT ascii photometry file to vaex dataframe.
 
         Inputs
@@ -235,24 +323,38 @@ class DolphotOutput:
             Photometry ascii file
         df_col : pandas.DataFrame
             Table of column information, such as from DolphotOutput.read_colfile
-        keep_exposure_cols : bool, default False
-            Keep all columns with measurements for individual exposures?
+        dataframe_type : str, one of ['vaex', 'pandas', 'dask'], default 'vaex'
+            Library to use for reading in ascii file.
             
         Returns
         -------
-        ds : vaex.dataframe.DataFrame
-            Vaex dataframe of photometry.
+        df : dataframe
+            Photometry table.
         '''
-        if not keep_exposure_cols:
-            df_col = df_col.loc[df_col['is_single_image'] == False]
-        ds = vaex.from_csv(photfile, copy_index=False, sep=r'\s+',
-                           names=df_col.index.tolist(), usecols=df_col['num'].tolist(),
-                           na_values=df_col['na_values'].to_dict(),
-                           dtype=df_col['dtype'].to_dict())
-        return ds
+        csv_reader_kwargs = dict(sep=r'\s+',
+                                 names=df_col.index.tolist(), 
+                                 usecols=df_col['num'].tolist(), 
+                                 na_values=df_col['na_values'].to_dict(), 
+                                 keep_default_na=False,
+                                 dtype=df_col['dtype'].to_dict(),
+                                 low_memory=True,
+                                 float_precision='round_trip',
+                                 )
+        if dataframe_type == 'vaex':
+            import vaex
+            df = vaex.from_csv(photfile, **csv_reader_kwargs,
+                               copy_index=False, 
+                               )
+        elif dataframe_type == 'dask':
+            import dask.dataframe as dd
+            df = dd.read_csv(photfile, **csv_reader_kwargs)
+        elif dataframe_type == 'pandas':
+            df = pd.read_csv(photfile, **csv_reader_kwargs)
+        return df
     
     @staticmethod
-    def _add_fake_input_cols(df_col : pd.DataFrame, trim_input_cols : bool = True,
+    def _add_fake_input_cols(df_col : pd.DataFrame, 
+                             trim_input_cols : bool = True,
                              ) -> pd.DataFrame:
         '''Add columns corresponding to AST inputs to column dataframe.
         
@@ -286,21 +388,27 @@ class DolphotOutput:
             else:
                 is_mag_in = df_col['suffix'].eq('MAG_IN')
                 df_col.loc[is_mag_in, 'name'] = df_col['prefix'].str.cat(df_col['suffix'], sep='_').loc[is_mag_in]
+            df_col.loc[is_mag_in, 'is_single_image'] = False
             df_col = df_col.drop_duplicates(subset=['name'], keep='first')
         return df_col.set_index('name')
     
     @staticmethod
-    def _calc_wcs(ds : vaex.dataframe.DataFrame, refimage : str | os.PathLike, 
-                  xcol : str = 'X', ycol : str = 'Y',
-                  ) -> tuple(np.typing.ArrayLike, np.typing.ArrayLike):
+    def _calc_wcs(df, 
+                  refimage : str | os.PathLike, 
+                  dataframe_type : str = 'pandas',
+                  xcol : str = 'X', 
+                  ycol : str = 'Y',
+                  ):
         '''Convert X and Y columns to world coordinates with refimage WCS.
         
         Inputs
         ------
-        ds : vaex.dataframe.DataFrame
+        df : dataframe
             Photometry table
         refimage : str or path-like object
             Path to reference image FITS file with WCS specification
+        dataframe_type : str, one of ['pandas', 'vaex', 'dask'], default 'pandas'
+            Library for reading in and storing photometry table.
         xcol : str, default "X"
             Column with reference image x-coordinate values.
         ycol : str, default "Y"
@@ -320,23 +428,35 @@ class DolphotOutput:
             else:
                 w = WCS(f[1].header, fobj=f)
         # dolphot pixel coordinates are half a pixel off from every other convention
-        ra, dec = w.all_pix2world(*ds.evaluate([f'{xcol}-0.5', f'{ycol}-0.5'], array_type='numpy'), 
-                                  0, ra_dec_order=True)
+        if dataframe_type == 'vaex':
+            x, y = df.evaluate([f'{xcol}-0.5', f'{ycol}-0.5'], array_type='numpy')
+        elif dataframe_type == 'pandas':
+            x, y = df.eval(f'{xcol}-0.5').to_numpy(), df.eval(f'{ycol}-0.5').to_numpy()
+        elif dataframe_type == 'dask':
+            x, y = df.eval(f'{xcol}-0.5').compute(), df.eval(f'{ycol}-0.5').compute()
+        ra, dec = w.all_pix2world(x, y, 0, ra_dec_order=True)
         return ra, dec
     
     @staticmethod
-    def _make_id_from_radec(ra : np.typing.ArrayLike, dec : np.typing.ArrayLike,
-                            precision : int = 5) -> np.typing.ArrayLike:
+    def _make_id_from_radec(ra : np.typing.ArrayLike, 
+                            dec : np.typing.ArrayLike,
+                            precision : int = 4):
         '''Make string ID from RA and Dec arrays.
         
         Inputs
         ------
         ra : array-like
-            Array of RA values in degrees.
+            Array of right ascension values in degrees.
         dec : array-like
-            Array of Dec values in degrees.
-        precision : int, default 5
+            Array of declination values in degrees.
+        precision : int, default 4
             Decimal precision of the last place of sexagesimal notation.
+            
+        Returns
+        -------
+        id_str : array-like of strings
+            Array of source ID strings, of the format 
+            'J<HHMMSS.SSSS+DDMMSS.SSSS>'
         '''
         from astropy.coordinates import SkyCoord
         coo = SkyCoord(ra, dec, unit='deg', frame='icrs')
@@ -348,14 +468,17 @@ class DolphotOutput:
         return id_str.to_numpy().astype('str')
     
     @staticmethod
-    def _cull_photometry(ds : vaex.dataframe.DataFrame, param_dict : Optional[dict] = None,
-                         verbose : bool = False) -> vaex.dataframe.DataFrame:
+    def _cull_photometry(df, 
+                         param_dict : Optional[dict] = None,
+                         dataframe_type : str = 'pandas', 
+                         verbose : bool = False
+                         ):
         """Make ST ("star") and GST ("good star") selections on photometry catalog.
 
         Inputs
         ------
-        ds : vaex.dataframe.DataFrame
-            Vaex dataframe of photometry or ASTs.
+        df : dataframe
+            Dataframe of photometry or ASTs.
         param_dict : dict or None, default None
             Dictionary of custom culling parameters.
         verbose : bool, default False
@@ -364,10 +487,18 @@ class DolphotOutput:
         
         Returns
         -------
-        ds : vaex.dataframe.DataFrame
+        df : dataframe
             Input dataframe with added ST and GST columns.
         """
-        mag_cols = pd.Series(ds.get_column_names(regex='.*_(VEGA|MAG)$'))
+        if dataframe_type == 'vaex':
+            mag_cols = pd.Series(df.get_column_names(regex='.*_(VEGA|MAG)$'))
+            pass_col = df.get_column_names(regex='^PASS$')
+        elif dataframe_type == 'dask':
+            mag_cols = [c for c in df.columns if c.endswith('VEGA') or c.endswith('MAG')]
+            pass_col = [c for c in df.columns if c == 'PASS']
+        else:
+            mag_cols = df.filter(regex='.*_(VEGA|MAG)$').columns
+            pass_col = df.filter(regex='^PASS$')
         # make initial selections by filter
         default_cuts = {'objcut': 3, 'snrcut': 4.0, 'flagcut': 4, 
                         'passcut': 3, 'roundcut': 0.5,
@@ -379,7 +510,7 @@ class DolphotOutput:
                         'roman_sharp': 0.15, 'roman_crowd': 0.5,
                         }
         univ_keys = ['objcut', 'snrcut', 'flagcut', 'roundcut']
-        if 'PASS' in ds.get_column_names():
+        if 'PASS' in pass_col:
             univ_keys += ['passcut']
         for col in mag_cols:
             prefix = re.split(r'_(VEGA|MAG)$', col)[0]
@@ -389,9 +520,9 @@ class DolphotOutput:
                 detector = 'ir'
             elif ('ACS' in prefix) or (re.match('^j[a-z0-9]{8}_', prefix) is not None):
                 detector = 'wfc'
-            elif ('NIRCAM' in prefix) or ('NIRISS' in prefix) or (re.match('^jw[0-9]{11}_[0-9]{5}_[0-9]{5}_nrc', prefix) is not None):
+            elif ('NIRCAM' in prefix) or ('NIRISS' in prefix) or (re.match('^jw[0-9]{11}_[0-9]{5}_[0-9]{5}_n', prefix) is not None):
                 detector = 'nircam'
-            elif ('ROMAN' in prefix) or (re.match('^r[0-9]{19}_[0-9]{4}_wfi[01][0-9]_f[0-9]{3}_cal') is not None):
+            elif ('ROMAN' in prefix) or (re.match('^r[0-9]{19}_[0-9]{4}_wfi[01][0-9]_f[0-9]{3}_cal', prefix) is not None):
                 detector = 'roman'
             else:
                 detector = 'default'
@@ -407,16 +538,23 @@ class DolphotOutput:
                         cuts[k] = default_cuts[k]
                     else:
                         cuts[k] = param_dict[k]
-            st_str = '(OBJTYPE < {1}) & ({0}_SNR > {2}) & ({0}_FLAG < {3}) & ({0}_ROUND < {4}) & ({0}_SHARP < {5})'.\
+            st_str = '(OBJTYPE < {1:d}) & ({0}_SNR > {2:.3f}) & ({0}_FLAG < {3:d}) & ({0}_ROUND < {4:.3f}) & ({0}_SHARP < {5:.3f})'.\
                 format(prefix, cuts['objcut'], cuts['snrcut'], cuts['flagcut'], cuts['roundcut'], cuts[f'{detector}_sharp'])
             if 'passcut' in cuts.keys():
-                st_str += ' & (PASS < {0})'.format(cuts['passcut'])
-            gst_str = st_str + ' & ({0}_CROWD < {1})'.format(prefix, cuts[f'{detector}_crowd'])
-            ds[f'{prefix}_ST'] = ds.func.where(ds[st_str], True, False, dtype='bool')
-            ds[f'{prefix}_GST'] = ds.func.where(ds[gst_str], True, False, dtype='bool')
+                st_str += ' & (PASS < {0:d})'.format(cuts['passcut'])
+            gst_str = st_str + ' & ({0}_CROWD < {1:.3f})'.format(prefix, cuts[f'{detector}_crowd'])
+            if dataframe_type == 'vaex':
+                df[f'{prefix}_ST'] = df.func.where(df[st_str], True, False, dtype='bool')
+                df[f'{prefix}_GST'] = df.func.where(df[gst_str], True, False, dtype='bool')
+            elif dataframe_type in ['pandas', 'dask']:
+                df = df.eval(f'{prefix}_ST = {st_str}')
+                df = df.eval(f'{prefix}_GST = {gst_str}')
+                # df[f'{prefix}_ST'] = df.eval(st_str).astype('bool')
+                # df[f'{prefix}_GST'] = df.eval(gst_str).astype('bool')
             if verbose:
-                n_st = ds[f'{prefix}_ST'].sum()
-                print(f'Found {n_st} out of {ds.length()} stars meeting ST criteria in {prefix}')
-                n_gst = ds[f'{prefix}_GST'].sum()
-                print(f'Found {n_gst} out of {ds.length()} stars meeting GST criteria in {prefix}')
-        return ds
+                n_st = df[f'{prefix}_ST'].sum()
+                n_gst = df[f'{prefix}_GST'].sum()
+                df_len = df.length() if dataframe_type == 'vaex' else len(df)
+                print(f'Found {n_st} out of {df_len} stars meeting ST criteria in {prefix}')
+                print(f'Found {n_gst} out of {df_len} stars meeting GST criteria in {prefix}')
+        return df
