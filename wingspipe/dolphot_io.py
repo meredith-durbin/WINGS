@@ -3,7 +3,7 @@
 """Tools to interact with DOLPHOT ascii outputs.
 
 TODO: 
-- add narwhal, polars, astropy table support
+- add polars, astropy table, narwhal support
 - update df_col when new columns added
 """
 
@@ -549,8 +549,6 @@ class DolphotOutput:
             elif dataframe_type in ['pandas', 'dask']:
                 df = df.eval(f'{prefix}_ST = {st_str}')
                 df = df.eval(f'{prefix}_GST = {gst_str}')
-                # df[f'{prefix}_ST'] = df.eval(st_str).astype('bool')
-                # df[f'{prefix}_GST'] = df.eval(gst_str).astype('bool')
             if verbose:
                 n_st = df[f'{prefix}_ST'].sum()
                 n_gst = df[f'{prefix}_GST'].sum()
