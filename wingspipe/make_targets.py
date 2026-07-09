@@ -29,10 +29,11 @@ def send(dp, conf, comp_name, total, job):
     dpconfigid = dpconfig.config_id
     #data = np.loadtxt(filepath, dtype=str, usecols=0, encoding='utf-8')
     #data = fits.open(filepath)
+    default_options = {'dp_id': dpid, 'to_run': total, 'name': comp_name, 'config_id': confid}
+    # FITS catalog input
     if '.fit' in dp.filename:
         print("FITS file detected")
         with fits.open(filepath) as data:
-        
             if  data[1].header['TFIELDS'] == 13:
                 """
                 Assumes file is STIPS ready if it has 13 columns - same as STIPS-created catalogues. Note: The file must have the format 'filename_filtername.fits'. The filtername must be of the form 'F087', though the extention may be '.fits' or '.fit'.
@@ -42,68 +43,66 @@ def send(dp, conf, comp_name, total, job):
                 targname = my_target.name
                 detname = '.'.join(targname.split('.')[:-1])
                 event = job.child_event('new_stips_catalog', jargs='0', value='0',
-                                        options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 
-                                                 'ra_dither': 0.0, 'dec_dither': 0.0, 'config_id': confid, 'detname': detname})
+                                        options={**default_options, 'ra_dither': 0.0, 'dec_dither': 0.0, 'detname': detname})
                 event.fire()
-       
             elif 'ra' in str(data[1].data.columns):
                 print('File ', filepath, ' has ra keyword, assuming positions defined')
                 print('Generating event for dp_id: ', dpid,' and CONF: ', confid)
                 eventtag = dpid
                 event = job.child_event('new_fixed_catalog', jargs='0', value='0', tag=eventtag,
-                        options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 'config_id': confid, 'submission_type':'scheduler', 'memory':'100G'})
+                        options={**default_options, 'submission_type':'scheduler', 'memory':'100G'})
                 print("generated event", event.event_id, "Firing...")
                 event.fire()
-
             else:
                 print('File ', filepath, ' does not have type keyword, assuming MATCH output')
-                event = job.child_event('new_match_catalog', jargs='0', value='0',
-                                    options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 'config_id': confid})
+                event = job.child_event('new_match_catalog', jargs='0', value='0', options=default_options)
                 event.fire()
-    
-    if '.csv' in dp.filename:
+    # .csv catalog input
+    elif '.csv' in dp.filename:
         print("csv file detected")
-
         with open(filepath) as myfile:
             data = [next(myfile) for x in range(3)]
-
         if 'type' in str(data[0]):
             print('File ', filepath, ' has type keyword, assuming STIPS-ready')
             my_target = dp.target
             targname = my_target.name
             detname = '.'.join(targname.split('.')[:-1])
             event = job.child_event('new_stips_catalog', jargs='0', value='0',
-                                    options={'dp_id': dpid, 'to_run': total, 'name': comp_name,
-                                             'ra_dither': 0.0, 'dec_dither': 0.0, 'config_id': confid, 'detname': detname})
+                                    options={**default_options, 'ra_dither': 0.0, 'dec_dither': 0.0, 'detname': detname})
             event.fire()
-
         elif 'ra' in str(data[0]):
             print('File ', filepath, ' has ra keyword, assuming positions defined')
             print('Generating event for dp_id: ', dpid,' and CONF: ', confid)
             eventtag = dpid
             event = job.child_event('new_fixed_catalog', jargs='0', value='0', tag=eventtag,
-                                    options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 'config_id': confid,'submission_type':'scheduler', 'memory':'100G'})
+                                    options={**default_options, 'submission_type':'scheduler', 'memory':'100G'})
             print("generated event", event.event_id, "Firing...")
             event.fire()
-
         else:
             print('File ', filepath, ' does not have type keyword, assuming MATCH output')
             event = job.child_event('new_match_catalog', jargs='0', value='0',
-                                    options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 'config_id': confid,'submission_type':'scheduler', 'memory':'100G'})
+                                    options={**default_options, 'submission_type':'scheduler', 'memory':'100G'})
             event.fire()
-    if '.hdf5' in dp.filename:
+    # hdf5 catalog input
+    elif '.hdf5' in dp.filename:
         print("hdf5 file detected")
         eventtag = dpid
-        event = job.child_event('new_fixed_catalog', jargs='0', value='0', tag=eventtag,
-                options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 'config_id': confid})
+        event = job.child_event('new_fixed_catalog', jargs='0', value='0', tag=eventtag, options=default_options)
         print("generated event", event.event_id, "Firing...")
         event.fire()
-
-    if '.' not in dp.filename:
+    # ecsv target list input
+    elif '.ecsv' in dp.filename:
+        print('ECSV file detected, assuming romanisim input')
+        event = job.child_event('new_romanisim_target', jargs='0', value='0', tag=dp.dp_id,
+                options={**default_options, 'submission_type': 'scheduler', 'memory': '2G'})
+        print("generated event", event.event_id, "Firing...")
+        event.fire()
+    # healpix list input
+    elif '.' not in dp.filename:
         print("healpix list file detected")
         eventtag = dpid
         event = job.child_event('new_healpix_target', jargs='0', value='0', tag=eventtag,
-                options={'dp_id': dpid, 'to_run': total, 'name': comp_name, 'submission_type': 'scheduler', 'memory': '2G', 'config_id': confid})
+                options={**default_options, 'submission_type': 'scheduler', 'memory': '2G'})
         print("generated event", event.event_id, "Firing...")
         event.fire()
 
