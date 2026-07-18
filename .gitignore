@@ -24,3 +24,8 @@ docs/source/_templates
 
 # Ignore pycharm directory
 .idea
+
+# Misc
+.DS_Store
+.env
+.vscode
