@@ -103,10 +103,15 @@ def run_isim_single(event_id, my_config):
     fits_filename = asdf_filename.replace('.asdf', '.fits')
     asdf_path = os.path.join(my_config.procpath, asdf_filename)
     fits_path = os.path.join(my_config.procpath, fits_filename)
-    asdf_dp = my_config.dataproduct(filename=asdf_filename, relativepath=my_config.procpath, 
-                                    group='proc', subtype='isim_asdf_image')
-    fits_dp = my_config.dataproduct(filename=fits_filename, relativepath=my_config.procpath, 
-                                    group='proc', subtype='isim_fits_image')
+    af = asdf.AsdfFile()
+    af.tree = {'roman': im}
+    af.write_to(asdf_path)
+    #im.writeto(asdf_filename, overwrite=True)
+    fitsfile.writeto(fits_path, overwrite=True)
+    asdf_dp = wp.DataProduct(my_config, filename=asdf_filename, relativepath=my_config.procpath, 
+                             group="proc", subtype="isim_asdf_image")
+    fits_dp = wp.DataProduct(my_config, filename=fits_filename, relativepath=my_config.procpath, 
+                             group="proc", subtype="isim_fits_image")
     # my_job.child_event()
     return
 
