@@ -94,7 +94,7 @@ def send(dp, conf, comp_name, total, job):
     elif '.ecsv' in dp.filename:
         print('ECSV file detected, assuming romanisim input')
         event = job.child_event('new_isim_target', jargs='0', value='0', tag=dp.dp_id,
-                options={**default_options, 'submission_type': 'scheduler', 'memory': '2G'})
+                options={**default_options, 'submission_type': 'scheduler', 'memory': '1G'})
         print("generated event", event.event_id, "Firing...")
         event.fire()
     # healpix list input

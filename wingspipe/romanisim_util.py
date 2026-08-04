@@ -71,6 +71,7 @@ def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='i
         Additional keyword arguments to be passed to table reader function. 
         Recommended:
         `format='ecsv', engine='pyarrow'` for ecsv;
+        `format='parquet'` for parquet;
         `format='fits'` for SOC inputs
         
     Returns
