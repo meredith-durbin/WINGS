@@ -12,7 +12,6 @@ import pandas as pd
 import re
 import s3fs
 import time
-import vaex
 import warnings
 
 import astropy.coordinates as ac
