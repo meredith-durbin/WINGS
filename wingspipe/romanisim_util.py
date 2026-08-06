@@ -44,6 +44,12 @@ from romanisim.util import random_points_in_cap
 from romancal.associations import asn_from_list
 from romancal.pipeline import MosaicPipeline
 
+import vaex
+try:
+    import galaxia_ananke as galaxia
+except ImportError:
+    print('Unable to import galaxia_ananke. Not compatible with new pyananke h5 format.')
+
 
 def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='isim', 
                              ab_vega_path='input_data/aux/abvega_offset_0002_rmap.csv',
@@ -94,13 +100,13 @@ def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='i
                 if catalog_type == 'isim':
                     tables.append(at.Table.read(f, **kwargs))
                 elif catalog_type == 'pyananke':
-                    ds = vaex.open(f)
+                    ds = vaex.open(f, group=galaxia.STARCATALOG_GROUP)
                     tables.append(pyananke_to_isim(ds, ab_vega_path=ab_vega_path))
         else:
             if catalog_type == 'isim':
                 tables.append(at.Table.read(table_path, **kwargs))
             elif catalog_type == 'pyananke':
-                ds = vaex.open(table_path)
+                ds = vaex.open(table_path, group=galaxia.STARCATALOG_GROUP)
                 tables.append(pyananke_to_isim(ds, ab_vega_path=ab_vega_path))
     if len(tables) == 0:
         print(f'No catalogs found at {catalog_dir} for HEALPix {hplist}!')
