@@ -618,7 +618,7 @@ def asdf_to_fits(im, json_file):
         pri_hdu.header.set('MJD-OBS', pri_hdu.header['MID_TIME'])
         pri_hdu.header.set('AIRMASS', 0.0)
         pri_hdu.header.set('EXPTIME0', pri_hdu.header['EFFTIME'])
-    if ('PHOTMJSR' in pri_hdu.header.keys()) and ('PIXAREA' in pri_hdu.header.keys())
+    if ('PHOTMJSR' in pri_hdu.header.keys()) and ('PIXAREA' in pri_hdu.header.keys()):
         cps_to_mjy = pri_hdu.header['PHOTMJSR'] * pri_hdu.header['PIXAREA'] * 1e6
         pri_hdu.header.set('DOL_C2JY', -2.5 * np.log10(cps_to_mjy))
     else:
@@ -639,5 +639,3 @@ def make_l3(l2_list, product_name):
                                         'outlier_detection':{'skip':True}, 
                                         'source_catalog':{'skip':True}})
     return result
-
-
