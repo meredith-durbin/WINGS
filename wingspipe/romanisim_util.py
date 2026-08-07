@@ -537,7 +537,7 @@ def calc_pix_area(wcs):
     jacobian = np.abs(dadx * dbdy - dady * dbdx)
     return jacobian
 
-def l2_asdf_to_fits(im, json_file):
+def asdf_to_fits(im, json_file):
     '''Convert Roman L2 image datamodel asdf format to FITS.
     
     Inputs
@@ -567,76 +567,74 @@ def l2_asdf_to_fits(im, json_file):
         if hasattr(im.meta, key):
             pri_hdu.header = update_fits_header_from_meta(key_map[key], pri_hdu.header, getattr(im.meta, key))
     # JANKY
-    if 'crds://' in im.meta.ref_file.gain:
-        gainfile = os.path.join(os.environ['CRDS_PATH'], 'references/roman/wfi', 
-                                im.meta.ref_file.gain.split('crds://')[-1])
-        with rdm.open(gainfile) as gn:
-            # gn_mean = np.nanmean(gn.data[4:-4, 4:-4])
-            # img_hdu.data *= gn.data[4:-4, 4:-4] / gn_mean
-            img_hdu.header.set('GAIN', np.nanmean(gn.data[4:-4, 4:-4]))
+    if hasattr(im.meta, 'ref_file'):
+        if 'crds://' in im.meta.ref_file.gain:
+            gainfile = os.path.join(os.environ['CRDS_PATH'], 'references/roman/wfi', 
+                                    im.meta.ref_file.gain.split('crds://')[-1])
+            with rdm.open(gainfile) as gn:
+                # gn_mean = np.nanmean(gn.data[4:-4, 4:-4])
+                # img_hdu.data *= gn.data[4:-4, 4:-4] / gn_mean
+                img_hdu.header.set('GAIN', np.nanmean(gn.data[4:-4, 4:-4]))
+        else:
+            img_hdu.header.set('GAIN', rparam.reference_data['gain'])
+        # img_hdu.header.set('GAIN', 1.0)
+        if 'crds://' in im.meta.ref_file.readnoise:
+            rnfile = os.path.join(os.environ['CRDS_PATH'], 'references/roman/wfi', 
+                                im.meta.ref_file.readnoise.split('crds://')[-1])
+            with rdm.open(rnfile) as rn:
+                img_hdu.header.set('RDNOISE', np.nanmean(rn.data[4:-4, 4:-4]))
+        else:
+            img_hdu.header.set('RDNOISE', rparam.reference_data['readnoise'])
+        
+        crds_param = {'ROMAN.META.INSTRUMENT.DETECTOR': im.meta.instrument.detector,
+                    'ROMAN.META.INSTRUMENT.NAME': im.meta.instrument.name,
+                    'ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT' : im.meta.instrument.optical_element,
+                    'ROMAN.META.EXPOSURE.TYPE' : im.meta.exposure.type,
+                    'ROMAN.META.EXPOSURE.START_TIME': im.meta.exposure.start_time.isot}
+        area_ref = None
+        try:
+            reffiles = crds.getreferences(crds_param, observatory='roman', 
+                                        reftypes=['area'], # , 'readnoise', 'gain'
+                                        context=im.meta.ref_file.crds.context,
+                                        ignore_cache=False, fast=True)
+            area_ref = reffiles['area']
+        except Exception:
+            print('Failed to acquire reference file(s).')
+        if area_ref is not None:
+            pamfile = rdm.open(area_ref)
+            pam = pamfile.data
+        else:
+            pam = calc_pix_area(WCS(img_hdu.header))
+        img_hdu.data *= pam * img_hdu.header['EFFTIME']
+    if hasattr(im, 'dq'):
+        mask_sat = (im.dq & 2) > 0
+        mask_bad = (im.dq & 1+8+1024) > 0
+        bad_val = min(img_hdu.data[~(mask_bad | mask_sat)].min() * 1.1, -100.)
+        sat_val = max(img_hdu.data[~(mask_sat | mask_bad)].max() * 1.1, 65536.)
+        img_hdu.data[mask_bad] = bad_val
+        img_hdu.data[mask_sat] = sat_val
+        pri_hdu.header.set('BADPIX', bad_val)
+        pri_hdu.header.set('SATURATE', sat_val)
+        pri_hdu.header.set('MJD-OBS', pri_hdu.header['MID_TIME'])
+        pri_hdu.header.set('AIRMASS', 0.0)
+        pri_hdu.header.set('EXPTIME0', pri_hdu.header['EFFTIME'])
+    if ('PHOTMJSR' in pri_hdu.header.keys()) and ('PIXAREA' in pri_hdu.header.keys())
+        cps_to_mjy = pri_hdu.header['PHOTMJSR'] * pri_hdu.header['PIXAREA'] * 1e6
+        pri_hdu.header.set('DOL_C2JY', -2.5 * np.log10(cps_to_mjy))
     else:
-        img_hdu.header.set('GAIN', rparam.reference_data['gain'])
-    # img_hdu.header.set('GAIN', 1.0)
-    if 'crds://' in im.meta.ref_file.readnoise:
-        rnfile = os.path.join(os.environ['CRDS_PATH'], 'references/roman/wfi', 
-                              im.meta.ref_file.readnoise.split('crds://')[-1])
-        with rdm.open(rnfile) as rn:
-            img_hdu.header.set('RDNOISE', np.nanmean(rn.data[4:-4, 4:-4]))
-    else:
-        img_hdu.header.set('RDNOISE', rparam.reference_data['readnoise'])
-    
-    crds_param = {'ROMAN.META.INSTRUMENT.DETECTOR': im.meta.instrument.detector,
-                  'ROMAN.META.INSTRUMENT.NAME': im.meta.instrument.name,
-                  'ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT' : im.meta.instrument.optical_element,
-                  'ROMAN.META.EXPOSURE.TYPE' : im.meta.exposure.type,
-                  'ROMAN.META.EXPOSURE.START_TIME': im.meta.exposure.start_time.isot}
-    area_ref = None
-    try:
-        reffiles = crds.getreferences(crds_param, observatory='roman', 
-                                      reftypes=['area'], # , 'readnoise', 'gain'
-                                      context=im.meta.ref_file.crds.context,
-                                      ignore_cache=False, fast=True)
-        area_ref = reffiles['area']
-    except Exception:
-        print('Failed to acquire reference file(s).')
-    if area_ref is not None:
-        pamfile = rdm.open(area_ref)
-        pam = pamfile.data
-    else:
-        pam = calc_pix_area(WCS(img_hdu.header))
-    img_hdu.data *= pam * img_hdu.header['EFFTIME']
-    mask_sat = (im.dq & 2) > 0
-    mask_bad = (im.dq & 1+8+1024) > 0
-    bad_val = min(img_hdu.data[~(mask_bad | mask_sat)].min() * 1.1, -100.)
-    sat_val = max(img_hdu.data[~(mask_sat | mask_bad)].max() * 1.1, 65536.)
-    img_hdu.data[mask_bad] = bad_val
-    img_hdu.data[mask_sat] = sat_val
-    pri_hdu.header.set('BADPIX', bad_val)
-    pri_hdu.header.set('SATURATE', sat_val)
-    pri_hdu.header.set('MJD-OBS', pri_hdu.header['MID_TIME'])
-    pri_hdu.header.set('AIRMASS', 0.0)
-    pri_hdu.header.set('EXPTIME0', pri_hdu.header['EFFTIME'])
-    cps_to_mjy = pri_hdu.header['PHOTMJSR'] * pri_hdu.header['PIXAREA'] * 1e6
-    pri_hdu.header.set('DOL_C2JY', -2.5 * np.log10(cps_to_mjy))
+        pri_hdu.header.set('DOL_C2JY', 0)
     pri_hdu.header.set('DOL_ROMN', 0)
-    # dq_hdu = fits.ImageHDU(data=im.dq, name='DQ')
-    # dq_hdu.header.set('EXTNAME', 'DQ')
-    # err_hdu = fits.ImageHDU(data=im.err.astype('float32'), name='ERR')
-    # err_hdu.header.set('EXTNAME', 'ERR')
-    # var_poisson_hdu = fits.ImageHDU(data=im.var_poisson.astype('float32'), name='VAR_POISSON')
-    # var_poisson_hdu.header.set('EXTNAME', 'VAR_POISSON')
-    # hdulist = fits.HDUList([pri_hdu, img_hdu, dq_hdu, err_hdu, var_poisson_hdu])
     hdulist = fits.HDUList([pri_hdu])
     return hdulist
 
-def make_l3(product_name, l2_list):
+def make_l3(l2_list, product_name):
     asn = asn_from_list.asn_from_list([(im, 'science') for im in l2_list],
                                       product_name=product_name, with_exptype=True, 
                                       target='none')
-    fname, txt = asn.dump()
-    with open(fname, 'w') as f:
-        f.write(txt)
-    result = MosaicPipeline.call(fname, configure_log=False, on_disk=True, save_results=True,
+    # fname, txt = asn.dump()
+    # with open(fname, 'w') as f:
+    #     f.write(txt)
+    result = MosaicPipeline.call(asn, configure_log=False, on_disk=True, save_results=True,
                                  steps={'skymatch':{'skip': True}, 
                                         'outlier_detection':{'skip':True}, 
                                         'source_catalog':{'skip':True}})

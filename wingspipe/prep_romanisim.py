@@ -28,10 +28,10 @@ from pathlib import Path
 
 if __name__ == '__main__':
     from romanisim_util import (PointWFI, read_isim_input_catalogs, make_l2, 
-                                set_obs_metadata, make_l2_filename, l2_asdf_to_fits)
+                                set_obs_metadata, make_l2_filename, asdf_to_fits)
 else:
     from wpipe.romanisim_util import (PointWFI, read_isim_input_catalogs, make_l2,  
-                                      set_obs_metadata, make_l2_filename, l2_asdf_to_fits)
+                                      set_obs_metadata, make_l2_filename, asdf_to_fits)
 
 def register(task):
     _temp = task.mask(source='*', name='start', value=task.name)
