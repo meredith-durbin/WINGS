@@ -629,12 +629,13 @@ def asdf_to_fits(im, json_file):
 
 def make_l3(l2_list, product_name):
     asn = asn_from_list.asn_from_list([(im, 'science') for im in l2_list],
-                                      product_name=product_name, with_exptype=True, 
+                                      product_name=product_name, 
+                                      with_exptype=True, 
                                       target='none')
-    # fname, txt = asn.dump()
-    # with open(fname, 'w') as f:
-    #     f.write(txt)
-    result = MosaicPipeline.call(asn, configure_log=False, on_disk=True, save_results=True,
+    result = MosaicPipeline.call(asn, 
+                                 configure_log=False, 
+                                 on_disk=True, 
+                                 save_results=True,
                                  steps={'skymatch':{'skip': True}, 
                                         'outlier_detection':{'skip':True}, 
                                         'source_catalog':{'skip':True}})
