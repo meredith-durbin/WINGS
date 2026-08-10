@@ -636,7 +636,7 @@ def make_l3(l2_list, product_name):
                                  configure_log=False, 
                                  on_disk=True, 
                                  save_results=True,
-                                 steps={'skymatch':{'skip': True}, 
-                                        'outlier_detection':{'skip':True}, 
+                                 steps={ #'skymatch':{'skip': True}, 
+                                         #'outlier_detection':{'skip':True}, 
                                         'source_catalog':{'skip':True}})
     return result
