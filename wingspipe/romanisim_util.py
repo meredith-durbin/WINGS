@@ -379,8 +379,9 @@ def read_dithers(dither_file : str | os.PathLike):
               for k, g in dithers.groupby(groups)}
     return tables
 
-def set_obs_metadata(meta, program : int, plan : int, passnum : int, 
-                     seg : int, obs : int, visit : int, exposure : int):
+def set_obs_metadata(program : int, plan : int, passnum : int, 
+                     seg : int, obs : int, visit : int, exposure : int,
+                     detector : str, opt_elem : str):
     obs_meta = {'program'        : program,
                 'execution_plan' : plan,
                 'pass'           : passnum,
@@ -393,8 +394,9 @@ def set_obs_metadata(meta, program : int, plan : int, passnum : int,
     observation_id = f'{visit_id}{exposure:04d}'
     obs_meta['visit_id'] = visit_id
     obs_meta['observation_id'] = observation_id
-    meta.update(obs_meta)
-    return meta
+    l2_filename = f'r{visit_id}_{exposure:04d}_{detector.lower()}_{opt_elem.lower()}_cal.asdf'
+    # meta.update(obs_meta)
+    return obs_meta, l2_filename
 
 def make_l2_filename(meta, visit_id=None, exposure=None, detector=None, opt_elem=None):
     # https://roman-docs.stsci.edu/data-handbook/wfi-data-levels-and-products
@@ -561,7 +563,6 @@ def asdf_to_fits(im, json_file):
     img_hdu.header.set('EXTNAME', 'DATA')
     img_hdu.header.set('BUNIT', 'DN', 'Image units')
     pri_hdu = img_hdu
-    # pri_hdu = fits.PrimaryHDU()
     # relevant metadata
     for key in key_map.keys():
         if hasattr(im.meta, key):
@@ -572,12 +573,9 @@ def asdf_to_fits(im, json_file):
             gainfile = os.path.join(os.environ['CRDS_PATH'], 'references/roman/wfi', 
                                     im.meta.ref_file.gain.split('crds://')[-1])
             with rdm.open(gainfile) as gn:
-                # gn_mean = np.nanmean(gn.data[4:-4, 4:-4])
-                # img_hdu.data *= gn.data[4:-4, 4:-4] / gn_mean
                 img_hdu.header.set('GAIN', np.nanmean(gn.data[4:-4, 4:-4]))
         else:
             img_hdu.header.set('GAIN', rparam.reference_data['gain'])
-        # img_hdu.header.set('GAIN', 1.0)
         if 'crds://' in im.meta.ref_file.readnoise:
             rnfile = os.path.join(os.environ['CRDS_PATH'], 'references/roman/wfi', 
                                 im.meta.ref_file.readnoise.split('crds://')[-1])
@@ -615,8 +613,10 @@ def asdf_to_fits(im, json_file):
         img_hdu.data[mask_sat] = sat_val
         pri_hdu.header.set('BADPIX', bad_val)
         pri_hdu.header.set('SATURATE', sat_val)
+    if 'MID_TIME' in pri_hdu.header.keys():
         pri_hdu.header.set('MJD-OBS', pri_hdu.header['MID_TIME'])
-        pri_hdu.header.set('AIRMASS', 0.0)
+    pri_hdu.header.set('AIRMASS', 0.0)
+    if 'EFFTIME' in pri_hdu.header.keys():
         pri_hdu.header.set('EXPTIME0', pri_hdu.header['EFFTIME'])
     if ('PHOTMJSR' in pri_hdu.header.keys()) and ('PIXAREA' in pri_hdu.header.keys()):
         cps_to_mjy = pri_hdu.header['PHOTMJSR'] * pri_hdu.header['PIXAREA'] * 1e6
@@ -636,7 +636,5 @@ def make_l3(l2_list, product_name):
                                  configure_log=False, 
                                  on_disk=True, 
                                  save_results=True,
-                                 steps={ #'skymatch':{'skip': True}, 
-                                         #'outlier_detection':{'skip':True}, 
-                                        'source_catalog':{'skip':True}})
+                                 steps={'source_catalog':{'skip':True}})
     return result
