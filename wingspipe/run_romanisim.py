@@ -79,14 +79,14 @@ def run_isim_single(event_id, my_config):
         t = at.vstack([t_input, t_bg])
     else:
         t = t_input
+    im, t_trim = make_l2(t, row['RA'], row['DEC'], row['BANDPASS'], 
+                         row['MA_TABLE_NUMBER'], row['SCA'], pa_cen=row['PA'])
     input_filename = asdf_filename.replace('cal.asdf', 'input.parquet')
     input_path = os.path.join(my_config.procpath, t_input_filename)
-    t.write(input_path, format='parquet')
+    t_trim.write(input_path, format='parquet')
     input_dp = wp.DataProduct(my_config, filename=input_filename, relativepath=my_config.procpath,
                               group='proc', data_type='catalog', subtype='isim_l2_input_catalog',
                               filtername=row['BANDPASS'])
-    im = make_l2(t, row['RA'], row['DEC'], row['BANDPASS'], 
-                 row['MA_TABLE_NUMBER'], row['SCA'], pa_cen=row['PA'])
     im.meta.observation.update(obs_meta)
     # asdf_filename = make_l2_filename(im.meta)
     im.meta['filename'] = asdf_filename

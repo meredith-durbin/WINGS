@@ -467,19 +467,21 @@ def make_l2(t : at.Table, ra_cen : float, dec_cen : float,
         importlib.reload(rparam)
     if len(t) == 0:
         print('Zero-length input table; skipping source injection step.')
-        return im
+        return im, t
     # inject sources that are within the image footprint
     x, y = im.meta.wcs.invert(t['ra'], t['dec'], with_bounding_box=True)
     keep = np.isfinite(x) & np.isfinite(y)
     if keep.sum() == 0:
         print(f'No input sources overlap with SCA {sca:02d}; skipping source injection.')
-        return im
+        return im, t[keep]
     print(f'{keep.sum()} sources out of {len(keep)} in WFI{sca:02d} footprint')
     psf = romanisim.psf.make_psf(sca, bandpass, wcs=rwcs.GWCS(im.meta.wcs), variable=variable_psf,
                                  chromatic=chromatic, psftype=psftype, date=obs_date)
     iminj = romanisim.image.inject_sources_into_l2(im, t[keep], x=x[keep], y=y[keep], psf=psf, 
                                                    psftype=psftype, seed=seed, rng=rng)
-    return iminj
+    t['x'] = x
+    t['y'] = y
+    return iminj, t[keep]
 
 def update_fits_header_from_meta(key_dict, header, meta):
     '''Update FITS header with values from asdf meta.
@@ -585,10 +587,10 @@ def asdf_to_fits(im, json_file):
             img_hdu.header.set('RDNOISE', rparam.reference_data['readnoise'])
         
         crds_param = {'ROMAN.META.INSTRUMENT.DETECTOR': im.meta.instrument.detector,
-                    'ROMAN.META.INSTRUMENT.NAME': im.meta.instrument.name,
-                    'ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT' : im.meta.instrument.optical_element,
-                    'ROMAN.META.EXPOSURE.TYPE' : im.meta.exposure.type,
-                    'ROMAN.META.EXPOSURE.START_TIME': im.meta.exposure.start_time.isot}
+                      'ROMAN.META.INSTRUMENT.NAME': im.meta.instrument.name,
+                      'ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT' : im.meta.instrument.optical_element,
+                      'ROMAN.META.EXPOSURE.TYPE' : im.meta.exposure.type,
+                      'ROMAN.META.EXPOSURE.START_TIME': im.meta.exposure.start_time.isot}
         area_ref = None
         try:
             reffiles = crds.getreferences(crds_param, observatory='roman', 
@@ -628,6 +630,7 @@ def asdf_to_fits(im, json_file):
     return hdulist
 
 def make_l3(l2_list, product_name):
+    # TODO: add asn and pipeline kwargs
     asn = asn_from_list.asn_from_list([(im, 'science') for im in l2_list],
                                       product_name=product_name, 
                                       with_exptype=True, 
