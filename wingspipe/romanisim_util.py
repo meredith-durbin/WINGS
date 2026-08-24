@@ -452,6 +452,7 @@ def make_l2(t : at.Table, ra_cen : float, dec_cen : float,
     '''
     # turn off asdf version warnings
     warnings.filterwarnings('ignore', category=asdf.exceptions.AsdfPackageVersionWarning)
+    rng = galsim.UniformDeviate(seed)
     if usecrds:
         for k in rparam.reference_data.keys():
             rparam.reference_data[k] = None
@@ -460,28 +461,30 @@ def make_l2(t : at.Table, ra_cen : float, dec_cen : float,
                                            ma_table_number=ma_table_number, usecrds=usecrds)
     rwcs.fill_in_parameters(metadata, ac.SkyCoord(ra_cen, dec_cen, unit='deg', frame='icrs'), 
                             boresight=False, pa_aper=pa_cen)
-    rng = galsim.UniformDeviate(seed)
-    im, extras = romanisim.image.simulate(metadata, at.Table(), usecrds=usecrds, psftype=psftype, 
-                                          level=2, persistence=persist, rng=rng)
-    if usecrds:
-        importlib.reload(rparam)
-    if len(t) == 0:
-        print('Zero-length input table; skipping source injection step.')
-        return im, t
-    # inject sources that are within the image footprint
-    x, y = im.meta.wcs.invert(t['ra'], t['dec'], with_bounding_box=True)
+    imwcs = rwcs.get_wcs(metadata, usecrds=usecrds)
+    x, y = imwcs.invert(t['ra'], t['dec'], with_bounding_box=True)
     keep = np.isfinite(x) & np.isfinite(y)
-    if keep.sum() == 0:
-        print(f'No input sources overlap with SCA {sca:02d}; skipping source injection.')
-        return im, t[keep]
-    print(f'{keep.sum()} sources out of {len(keep)} in WFI{sca:02d} footprint')
-    psf = romanisim.psf.make_psf(sca, bandpass, wcs=rwcs.GWCS(im.meta.wcs), variable=variable_psf,
-                                 chromatic=chromatic, psftype=psftype, date=obs_date)
-    iminj = romanisim.image.inject_sources_into_l2(im, t[keep], x=x[keep], y=y[keep], psf=psf, 
-                                                   psftype=psftype, seed=seed, rng=rng)
+    print(f'{keep.sum()} sources out of {len(keep)} in WFI{sca:02d} footprint.')
+    im, extras = romanisim.image.simulate(metadata, t[keep], usecrds=usecrds, psftype=psftype, 
+                                          level=2, persistence=persist, rng=rng)
+    # if usecrds:
+    #     importlib.reload(rparam)
+    # if len(t) == 0:
+    #     print('Zero-length input table.') #; skipping source injection step.')
+    #     return im, t
+    # inject sources that are within the image footprint
+    # x, y = im.meta.wcs.invert(t['ra'], t['dec'], with_bounding_box=True)
+    # keep = np.isfinite(x) & np.isfinite(y)
+    # if keep.sum() == 0:
+    #     print(f'No input sources overlap with SCA {sca:02d}.')
+        # return im, t[keep]
+    # psf = romanisim.psf.make_psf(sca, bandpass, wcs=rwcs.GWCS(im.meta.wcs), variable=variable_psf,
+    #                              chromatic=chromatic, psftype=psftype, date=obs_date)
+    # iminj = romanisim.image.inject_sources_into_l2(im, t[keep], x=x[keep], y=y[keep], psf=psf, 
+    #                                                psftype=psftype, seed=seed, rng=rng)
     t['x'] = x
     t['y'] = y
-    return iminj, t[keep]
+    return im, t[keep]
 
 def update_fits_header_from_meta(key_dict, header, meta):
     '''Update FITS header with values from asdf meta.
@@ -541,7 +544,7 @@ def calc_pix_area(wcs):
     jacobian = np.abs(dadx * dbdy - dady * dbdx)
     return jacobian
 
-def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
+def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
     '''Convert Roman L2 image datamodel asdf format to FITS.
     
     Inputs
@@ -605,6 +608,7 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
             else:
                 pam = calc_pix_area(WCS(hdu.header))
             hdu.data *= pam
+            hdu.header.set('HISTORY', 'Multiplied by PAM')
     if hasattr(im, 'dq'):
         mask_sat = (im.dq & 2) > 0
         mask_bad = (im.dq & 1+8+1024) > 0
