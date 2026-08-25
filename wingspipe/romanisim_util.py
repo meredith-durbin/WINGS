@@ -599,7 +599,6 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
         mask_sat = (im.dq & 2) > 0
         mask_bad = (im.dq & 1+8+1024) > 0
         unmasked = hdu.data[im.dq == 0]
-        print(unmasked.min(), unmasked.max())
         bad_val = min(unmasked.min() * 1.1, -100.)
         sat_val = max(max(unmasked.max() * 1.1, 65536.), abs(bad_val))
         hdu.data[mask_bad] = bad_val
