@@ -462,26 +462,11 @@ def make_l2(t : at.Table, ra_cen : float, dec_cen : float,
     rwcs.fill_in_parameters(metadata, ac.SkyCoord(ra_cen, dec_cen, unit='deg', frame='icrs'), 
                             boresight=False, pa_aper=pa_cen)
     imwcs = rwcs.get_wcs(metadata, usecrds=usecrds)
-    x, y = imwcs.invert(t['ra'], t['dec'], with_bounding_box=True)
+    x, y = imwcs.wcs.invert(t['ra'], t['dec'], with_bounding_box=True)
     keep = np.isfinite(x) & np.isfinite(y)
     print(f'{keep.sum()} sources out of {len(keep)} in WFI{sca:02d} footprint.')
     im, extras = romanisim.image.simulate(metadata, t[keep], usecrds=usecrds, psftype=psftype, 
                                           level=2, persistence=persist, rng=rng)
-    # if usecrds:
-    #     importlib.reload(rparam)
-    # if len(t) == 0:
-    #     print('Zero-length input table.') #; skipping source injection step.')
-    #     return im, t
-    # inject sources that are within the image footprint
-    # x, y = im.meta.wcs.invert(t['ra'], t['dec'], with_bounding_box=True)
-    # keep = np.isfinite(x) & np.isfinite(y)
-    # if keep.sum() == 0:
-    #     print(f'No input sources overlap with SCA {sca:02d}.')
-        # return im, t[keep]
-    # psf = romanisim.psf.make_psf(sca, bandpass, wcs=rwcs.GWCS(im.meta.wcs), variable=variable_psf,
-    #                              chromatic=chromatic, psftype=psftype, date=obs_date)
-    # iminj = romanisim.image.inject_sources_into_l2(im, t[keep], x=x[keep], y=y[keep], psf=psf, 
-    #                                                psftype=psftype, seed=seed, rng=rng)
     t['x'] = x
     t['y'] = y
     return im, t[keep]
