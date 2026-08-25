@@ -575,9 +575,9 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
             area_ref = None
             try:
                 reffiles = crds.getreferences(crds_param, observatory='roman', 
-                                            reftypes=['area'], # , 'readnoise', 'gain'
-                                            context=im.meta.ref_file.crds.context,
-                                            ignore_cache=False, fast=True)
+                                              reftypes=['area'], # , 'readnoise', 'gain'
+                                              context=im.meta.ref_file.crds.context,
+                                              ignore_cache=False, fast=True)
                 area_ref = reffiles['area']
             except Exception:
                 print('Failed to acquire pixel area reference file.')
@@ -587,7 +587,14 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
             else:
                 pam = calc_pix_area(WCS(hdu.header))
             hdu.data *= pam
-            hdu.header.set('HISTORY', 'Multiplied by PAM')
+            # hdu.header.set('HISTORY', 'Multiplied by PAM')
+    if 'MID_TIME' in hdu.header.keys():
+        hdu.header.set('MJD-OBS', hdu.header['MID_TIME'])
+    hdu.header.set('AIRMASS', 0.0)
+    if 'EFFTIME' in hdu.header.keys():
+        hdu.header.set('EXPTIME0', hdu.header['EFFTIME'])
+        if multiply_exptime:
+            hdu.data *= hdu.header['EFFTIME']
     if hasattr(im, 'dq'):
         mask_sat = (im.dq & 2) > 0
         mask_bad = (im.dq & 1+8+1024) > 0
@@ -597,13 +604,6 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
         hdu.data[mask_sat] = sat_val
         hdu.header.set('BADPIX', bad_val)
         hdu.header.set('SATURATE', sat_val)
-    if 'MID_TIME' in hdu.header.keys():
-        hdu.header.set('MJD-OBS', hdu.header['MID_TIME'])
-    hdu.header.set('AIRMASS', 0.0)
-    if 'EFFTIME' in hdu.header.keys():
-        hdu.header.set('EXPTIME0', hdu.header['EFFTIME'])
-        if multiply_exptime:
-            hdu.data *= hdu.header['EFFTIME']
     if ('PHOTMJSR' in hdu.header.keys()) and ('PIXAREA' in hdu.header.keys()):
         cps_to_mjy = hdu.header['PHOTMJSR'] * hdu.header['PIXAREA'] * 1e6
         hdu.header.set('DOL_C2JY', -2.5 * np.log10(cps_to_mjy))
