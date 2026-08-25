@@ -412,7 +412,6 @@ def make_l2(t : at.Table, ra_cen : float, dec_cen : float,
             pa_cen : float = 0.0, obs_date : str = '2027-06-01T00:00:00', 
             psftype : str = 'epsf', seed : int = 7, 
             usecrds : bool = True, persist : Optional[rpersist.Persistence] = None, 
-            chromatic : bool = False, variable_psf : bool = True,
             ):
     '''Simulate single-SCA L2 frame with romanisim.
     
@@ -444,11 +443,6 @@ def make_l2(t : at.Table, ra_cen : float, dec_cen : float,
         CRDS_SERVER_URL environment variables to be set.
     persist : (optional) rpersist.Persistence, default None
         romanisim Persistence object or None.
-    chromatic : bool, default False
-        Whether to use a chromatic PSF. Not fully implemented yet.
-    variable_psf : bool, default True
-        Allows for fast point source placement via PSF interpolation.
-        Incompatible with chromatic = True.
     '''
     # turn off asdf version warnings
     warnings.filterwarnings('ignore', category=asdf.exceptions.AsdfPackageVersionWarning)
