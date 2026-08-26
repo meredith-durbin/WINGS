@@ -568,10 +568,10 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
             hdu.header.set('RDNOISE', rparam.reference_data['readnoise'])
         if multiply_pam:
             crds_param = {'ROMAN.META.INSTRUMENT.DETECTOR': im.meta.instrument.detector,
-                        'ROMAN.META.INSTRUMENT.NAME': im.meta.instrument.name,
-                        'ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT' : im.meta.instrument.optical_element,
-                        'ROMAN.META.EXPOSURE.TYPE' : im.meta.exposure.type,
-                        'ROMAN.META.EXPOSURE.START_TIME': im.meta.exposure.start_time.isot}
+                          'ROMAN.META.INSTRUMENT.NAME': im.meta.instrument.name,
+                          'ROMAN.META.INSTRUMENT.OPTICAL_ELEMENT' : im.meta.instrument.optical_element,
+                          'ROMAN.META.EXPOSURE.TYPE' : im.meta.exposure.type,
+                          'ROMAN.META.EXPOSURE.START_TIME': im.meta.exposure.start_time.isot}
             area_ref = None
             try:
                 reffiles = crds.getreferences(crds_param, observatory='roman', 
@@ -586,8 +586,9 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
                 pam = pamfile.data
             else:
                 pam = calc_pix_area(WCS(hdu.header))
-            hdu.data = im.data.copy() * pam
-            # hdu.header.set('HISTORY', 'Multiplied by PAM')
+                area_ref = 'calculated from WCS'
+            hdu.data *= pam
+            hdu.header.set('HISTORY', f'Multiplied by pixel area map ({area_ref.split(os.sep)[-1]})')
     if 'MID_TIME' in hdu.header.keys():
         hdu.header.set('MJD-OBS', hdu.header['MID_TIME'])
     hdu.header.set('AIRMASS', 0.0)
@@ -595,6 +596,7 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
         hdu.header.set('EXPTIME0', hdu.header['EFFTIME'])
         if multiply_exptime:
             hdu.data *= hdu.header['EFFTIME']
+            hdu.header.set('HISTORY', 'Multiplied by exposure time (EFFTIME)')
     if hasattr(im, 'dq'):
         # mask_sat = (im.dq & 2) > 0
         # mask_bad = (im.dq & 1+8+1024) > 0
