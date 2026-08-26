@@ -586,7 +586,7 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
                 pam = pamfile.data
             else:
                 pam = calc_pix_area(WCS(hdu.header))
-            hdu.data *= pam
+            hdu.data = im.data.copy() * pam
             # hdu.header.set('HISTORY', 'Multiplied by PAM')
     if 'MID_TIME' in hdu.header.keys():
         hdu.header.set('MJD-OBS', hdu.header['MID_TIME'])

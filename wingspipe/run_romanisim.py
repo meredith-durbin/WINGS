@@ -88,15 +88,15 @@ def run_isim_single(event_id, my_config):
                               group='proc', data_type='catalog', subtype='isim_l2_input_catalog',
                               filtername=row['BANDPASS'])
     im.meta.observation.update(obs_meta)
-    # asdf_filename = make_l2_filename(im.meta)
     im.meta['filename'] = asdf_filename
-    fitsfile = asdf_to_fits(im, os.path.join(aux_dir, 'rdm_to_fits_keywords.json'))
-    fits_filename = asdf_filename.replace('.asdf', '.fits')
     asdf_path = os.path.join(my_config.procpath, asdf_filename)
-    fits_path = os.path.join(my_config.procpath, fits_filename)
     af = asdf.AsdfFile()
     af.tree = {'roman': im}
     af.write_to(asdf_path)
+    fitsfile = asdf_to_fits(im.copy(), os.path.join(aux_dir, 'rdm_to_fits_keywords.json'))
+    fits_filename = asdf_filename.replace('.asdf', '.fits')
+    asdf_path = os.path.join(my_config.procpath, asdf_filename)
+    fits_path = os.path.join(my_config.procpath, fits_filename)
     fitsfile.writeto(fits_path, overwrite=True)
     asdf_dp = wp.DataProduct(my_config, filename=asdf_filename, relativepath=my_config.procpath, 
                              group="proc", data_type='image', subtype="isim_l2_asdf_image", 
