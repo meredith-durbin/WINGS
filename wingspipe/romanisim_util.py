@@ -596,12 +596,12 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
         hdu.header.set('EXPTIME0', hdu.header['EFFTIME'])
         if multiply_exptime:
             hdu.data *= hdu.header['EFFTIME']
-            hdu.header.set('HISTORY', 'Multiplied by exposure time (EFFTIME)')
+            hdu.header.set('HISTORY', f'Multiplied by exposure time (EFFTIME, {hdu.header["EFFTIME"]})')
     if hasattr(im, 'dq'):
         # mask_sat = (im.dq & 2) > 0
         # mask_bad = (im.dq & 1+8+1024) > 0
         unmasked = hdu.data[im.dq == 0]
-        bad_val = min(unmasked.min() * 1.1, -100.)
+        bad_val = min(np.abs(unmasked.min()) * -1.1, -100.)
         sat_val = max(unmasked.max() * 1.1, 999999999999.)
         # hdu.data[mask_bad] = bad_val
         # hdu.data[mask_sat] = sat_val
