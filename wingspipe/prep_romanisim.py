@@ -27,9 +27,9 @@ from mhealpy import HealpixMap
 from pathlib import Path
 
 if __name__ == '__main__':
-    from romanisim_util import read_obs_plan
+    from romanisim_util import read_obs_plan, egg_to_romanisim
 else:
-    from wpipe.romanisim_util import read_obs_plan
+    from wpipe.romanisim_util import read_obs_plan, egg_to_romanisim
 
 def register(task):
     _temp = task.mask(source='*', name='start', value=task.name)
@@ -50,18 +50,22 @@ if __name__ == '__main__':
     parent_job_id = this_event.parent_job_id
     parent_job = this_event.parent_job
     compname = this_event.options['name']
-    # ra_dither = this_event.options['ra_dither']
-    # dec_dither = this_event.options['dec_dither']
-    # print('event', this_event_id, 'dp', this_dp_id)
-    # detname = this_event.options['detname']
+    print('event', this_event_id, 'dp', this_dp_id)
     target_id = this_event.options['dp_id']
     target_dp = wp.DataProduct(target_id)
     this_conf = target_dp.config
-    # print('DETNAME', detname)
-    
+    param = this_conf.parameters
     obs_plan = read_obs_plan(os.path.join(target_dp.relativepath, target_dp.filename),
-                             auxfiles_dir=this_conf.parameters['aux_dir'])
+                             auxfiles_dir=param['aux_dir'])
     total = len(obs_plan)
+    if this_conf.parameters['make_background']:
+        ra_idxmin, ra_idxmax = obs_plan['RA'].idxmin(), obs_plan['RA'].idxmax()
+        de_idxmin, de_idxmax = obs_plan['DEC'].idxmin(), obs_plan['DEC'].idxmax()
+        radec = obs_plan.loc[[ra_idxmin, ra_idxmax, de_idxmin, de_idxmax], ['RA', 'DEC']].to_numpy()
+        coo = SkyCoord(radec, frame='icrs', unit='deg')
+        # calc centroid and radius
+        bg_file = os.path.join(param['background_dir'], 'gg_catalog_2.txt')
+        t_bg = egg_to_romanisim(bg_file, ra, dec, radius=radius)
     for i, row in obs_plan.T.to_dict().items():
         my_event = this_job.child_event('new_isim_run', tag=i,
                                         options={'dp_id': dpid, 'to_run': total, 'name': compname,

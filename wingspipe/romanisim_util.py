@@ -151,7 +151,8 @@ def pyananke_to_isim(ds, ab_vega_path='input_data/aux/abvega_offset_0002_rmap.cs
 def egg_to_romanisim(input_table, ra, dec, radius=np.pi**-0.5, use_bulge=True):
     # If input is a string (a file), read it in as an astropy table
     if type(input_table) == str:
-        df = pd.read_csv(input_table, sep=r'\s+').sample(frac=0.281**-1, replace=True)
+        # resample to specified area - original catalog covers 0.281 deg^2
+        df = pd.read_csv(input_table, sep=r'\s+').sample(frac=np.pi*radius**2 / 0.281, replace=True)
         input_table = at.Table.from_pandas(df) #read(input_table, format='pandas.csv', sep=' ')
         
     coord = ac.SkyCoord(ra=ra*u.degree, dec=dec*u.degree)
@@ -277,7 +278,7 @@ class PointWFI:
         nest : bool, default False
             Use nested HEALPix schema?
         galactic : bool, default False
-            Whether SIAF sky coordinates need to be converted to Galactic.
+            Whether SIAF sky coordinates need to be converted to Galactic frame.
         radius : float, default 0.1
             Search radius in deg if specified aperture does not have defined 
             corners, in which case the sky reference point is used.
@@ -294,11 +295,8 @@ class PointWFI:
         if h5_dir:
             cwd = Path(h5_dir)
             state_file = list(cwd.glob('*.h5'))[0].with_suffix('').with_suffix('.state')
-            all_healpix = np.sort([
-                int(foo[0])
-                for f in cwd.glob(state_file.with_suffix('.*.h5').name)
-                if (foo:=re.findall(r".*\.(\d+)\.h5", f.name))
-                ])
+            all_healpix = np.sort([int(foo[0]) for f in cwd.glob(state_file.with_suffix('.*.h5').name)
+                                   if (foo:=re.findall(r".*\.(\d+)\.h5", f.name))])
             hp_map = HealpixMap(None, all_healpix, density=True)
             vertices = ac.SkyCoord(lon, lat, unit='deg', frame=['icrs', 'galactic'][int(galactic)])
             hplist = hp_map.uniq[hp_map.query_polygon(vertices.cartesian.xyz.T.value, inclusive=True)]
@@ -523,7 +521,7 @@ def calc_pix_area(wcs):
     jacobian = np.abs(dadx * dbdy - dady * dbdx)
     return jacobian
 
-def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
+def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
     '''Convert Roman L2 image datamodel asdf format to FITS.
     
     Inputs
@@ -545,7 +543,7 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
     sip_header = im.meta.wcs.to_fits_sip(bounding_box=((-0.5, nx - 0.5), (-0.5, ny - 0.5)))
     hdu = fits.PrimaryHDU(header=sip_header, data=im.data.copy())
     hdu.header.set('EXTNAME', 'DATA')
-    hdu.header.set('BUNIT', 'DN', 'Image units')
+    hdu.header.set('BUNIT', 'DN/s', 'Image units')
     # relevant metadata
     for key in key_map.keys():
         if hasattr(im.meta, key):
@@ -596,6 +594,7 @@ def asdf_to_fits(im, json_file, multiply_pam=False, multiply_exptime=True):
         hdu.header.set('EXPTIME0', hdu.header['EFFTIME'])
         if multiply_exptime:
             hdu.data *= hdu.header['EFFTIME']
+            hdu.header.set('BUNIT', 'DN', 'Image units')
             hdu.header.set('HISTORY', f'Multiplied by exposure time (EFFTIME, {hdu.header["EFFTIME"]})')
     if hasattr(im, 'dq'):
         # mask_sat = (im.dq & 2) > 0
