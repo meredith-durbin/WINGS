@@ -53,7 +53,7 @@ except ImportError:
 
 def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='isim', 
                              ab_vega_path='input_data/aux/abvega_offset_0002_rmap.csv',
-                             **kwargs):
+                             av_scale_factor=None, **kwargs):
     '''Read HEALPix input catalogs from directory.
     
     Inputs
@@ -101,13 +101,15 @@ def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='i
                     tables.append(at.Table.read(f, **kwargs))
                 elif catalog_type == 'pyananke':
                     ds = vaex.open(f, group=galaxia.STARCATALOG_GROUP)
-                    tables.append(pyananke_to_isim(ds, ab_vega_path=ab_vega_path))
+                    tables.append(pyananke_to_isim(ds, ab_vega_path=ab_vega_path, 
+                                                   av_scale_factor=av_scale_factor))
         else:
             if catalog_type == 'isim':
                 tables.append(at.Table.read(table_path, **kwargs))
             elif catalog_type == 'pyananke':
                 ds = vaex.open(table_path, group=galaxia.STARCATALOG_GROUP)
-                tables.append(pyananke_to_isim(ds, ab_vega_path=ab_vega_path))
+                tables.append(pyananke_to_isim(ds, ab_vega_path=ab_vega_path, 
+                                               av_scale_factor=av_scale_factor))
     if len(tables) == 0:
         print(f'No catalogs found at {catalog_dir} for HEALPix {hplist}!')
         return at.Table()
@@ -117,7 +119,8 @@ def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='i
         t = at.vstack(tables)
     return t
 
-def pyananke_to_isim(ds, ab_vega_path='input_data/aux/abvega_offset_0002_rmap.csv'):
+def pyananke_to_isim(ds, ab_vega_path='input_data/aux/abvega_offset_0002_rmap.csv', 
+                     av_scale_factor=None):
     '''Convert vaex dataframe of pyananke-simulated stars to romanisim input.
     
     Inputs
@@ -139,7 +142,10 @@ def pyananke_to_isim(ds, ab_vega_path='input_data/aux/abvega_offset_0002_rmap.cs
         ab_col = f'{filt.upper()}_AB'
         mgy_col = filt.upper()
         if ananke_col in ds.get_column_names(regex=f'^{ananke_col}$'):
-            ds[ab_col] = ds[f'{ananke_col} + {offset:.8f}']
+            if av_scale_factor is not None:
+                ds[ab_col] = ds[f'{ananke_col} + {offset:.8f} + {av_scale_factor}*A_{ananke_col}']
+            else:
+                ds[ab_col] = ds[f'{ananke_col} + {offset:.8f}']
             ds[mgy_col] = ds[f'10**({ab_col} / -2.5)']
             out_cols.append(mgy_col)
         else:
