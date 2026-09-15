@@ -621,22 +621,22 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
     hdulist = fits.HDUList([hdu])
     return hdulist
 
-def make_l3(l2_list, product_name, configure_log=False,
-            on_disk=True, save_results=True,
+def make_l3(l2_list, product_name, asn_kwargs=dict(target='none'),
+            configure_log=False, on_disk=True, save_results=True,
+            flux_args=dict(),
             skymatch_args=dict(lower=-100, upper=5000),
             outlier_args=dict(),
             resample_args=dict(), 
             source_catalog_args=dict(skip=True)):
-    # TODO: add asn and pipeline kwargs
     asn = asn_from_list.asn_from_list([(im, 'science') for im in l2_list],
                                       product_name=product_name, 
-                                      with_exptype=True, 
-                                      target='none')
+                                      with_exptype=True, **asn_kwargs)
     result = MosaicPipeline.call(asn, 
                                  configure_log=configure_log, 
                                  on_disk=on_disk, 
                                  save_results=save_results,
-                                 steps={'skymatch': skymatch_args,
+                                 steps={'flux': flux_args,
+                                        'skymatch': skymatch_args,
                                         'outlier_detection': outlier_args,
                                         'resample': resample_args,
                                         'source_catalog' : source_catalog_args})
