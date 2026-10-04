@@ -117,6 +117,8 @@ def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='i
         t = tables[0]
     else:
         t = at.vstack(tables)
+    t['ra'].unit = u.deg
+    t['dec'].unit = u.deg
     return t
 
 def pyananke_to_isim(ds, ab_vega_path='input_data/aux/abvega_offset_0002_rmap.csv', 
