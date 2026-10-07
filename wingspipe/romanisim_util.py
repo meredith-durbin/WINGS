@@ -117,8 +117,6 @@ def read_isim_input_catalogs(hplist, catalog_dir, name_template, catalog_type='i
         t = tables[0]
     else:
         t = at.vstack(tables)
-    t['ra'].unit = u.deg
-    t['dec'].unit = u.deg
     return t
 
 def pyananke_to_isim(ds, ab_vega_path='input_data/aux/abvega_offset_0002_rmap.csv', 
@@ -267,7 +265,7 @@ class PointWFI:
     
     def siaf_to_healpix(self, apername : str, h5_dir : Optional[str] = None, 
                         nside : int = 256,  inclusive : bool = True, 
-                        fact : int = 32, nest : bool = False, 
+                        fact : int = 16, nest : bool = False, 
                         galactic : bool = False, radius : float = 0.1,
                         ) -> np.typing.NDArray:
         '''Get HEALpix indices overlapping with specified SIAF aperture.
@@ -281,7 +279,7 @@ class PointWFI:
         inclusive : bool, default True
             Find all overlapping HEALPix or just those that directly intersect 
             the polygon edges?
-        fact : int, default 32
+        fact : int, default 16
             Factor to increase resolution by when evaluating HEALPix overlaps.
         nest : bool, default False
             Use nested HEALPix schema?
@@ -607,7 +605,7 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
     if hasattr(im, 'dq'):
         # mask_sat = (im.dq & 2) > 0
         # mask_bad = (im.dq & 1+8+1024) > 0
-        unmasked = hdu.data[im.dq == 0]
+        unmasked = hdu.data[(im.dq == 0) & np.isfinite(hdu.data)]
         bad_val = min(np.abs(unmasked.min()) * -1.1, -100.)
         sat_val = max(unmasked.max() * 1.1, 999999999999.)
         # hdu.data[mask_bad] = bad_val
