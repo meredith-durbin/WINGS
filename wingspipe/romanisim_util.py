@@ -492,7 +492,7 @@ def update_fits_header_from_meta(key_dict, header, meta):
             else:
                 header.set(fits_key, meta[asdf_key])
         else:
-            header.set(fits_key, None, comment='Not found in asdf file')
+            header.set(fits_key, '', comment='Not found in asdf file')
     return header
 
 def calc_pix_area(wcs):
@@ -594,6 +594,8 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
             hdu.data *= pam
             hdu.header.set('HISTORY', f'Multiplied by pixel area map ({area_ref.split(os.sep)[-1]})')
     if 'MID_TIME' in hdu.header.keys():
+        if hdu.header['MID_TIME'] == '':
+            hdu.header.set('MID_TIME', (hdu.header['EXPSTART'] + hdu.header['EXPEND']) / 2.)
         hdu.header.set('MJD-OBS', hdu.header['MID_TIME'])
     hdu.header.set('AIRMASS', 0.0)
     if 'EFFTIME' in hdu.header.keys():
