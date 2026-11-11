@@ -292,6 +292,10 @@ class PointWFI:
         aper = self.siaf[apername]
         try:
             lon, lat = aper.corners('sky')
+            lat[lat == lat.min()] -= 1/3600
+            lat[lat == lat.max()] += 1/3600
+            lon[lon == lon.min()] -= 1/3600 / np.cos(np.deg2rad(lat.mean()))
+            lon[lon == lon.max()] += 1/3600 / np.cos(np.deg2rad(lat.mean()))
         except TypeError:
             lon, lat = aper.reference_point('sky')
             lon, lat = np.array([lon]), np.array([lat])
@@ -335,7 +339,7 @@ def expand_dithers(row, auxfiles_dir='/home/mdurbin/pipelines/input_data/aux/',
         dither_sub = dither_sub.set_index('dither_number').rename_axis('sub')
         dither_all = pd.DataFrame(index=pd.MultiIndex.from_product([dither_gap.index, dither_sub.index]),
                                   columns=['EXPOSURE'], dtype='int').join(dither_gap, on='gap').add(dither_sub, level='sub')
-        dither_all['EXPOSURE'] = dithers_all['EXPOSURE'].fillna(1).astype('int').cumsum()
+        dither_all['EXPOSURE'] = dither_all['EXPOSURE'].fillna(1).astype('int').cumsum()
         dither_out = dither_all.reset_index(drop=True)
     new_ra, new_dec = initial_pointing.dither(dither_out['xshift'], dither_out['yshift'])
     dithered_plan = pd.concat([row.drop(['DITHER_GAP', 'DITHER_SUB'])] * len(dither_out), 
