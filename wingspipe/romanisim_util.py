@@ -292,10 +292,10 @@ class PointWFI:
         aper = self.siaf[apername]
         try:
             lon, lat = aper.corners('sky')
-            lat[lat == lat.min()] -= 1/3600
-            lat[lat == lat.max()] += 1/3600
-            lon[lon == lon.min()] -= 1/3600 / np.cos(np.deg2rad(lat.mean()))
-            lon[lon == lon.max()] += 1/3600 / np.cos(np.deg2rad(lat.mean()))
+            lat[lat == lat.min()] -= 1/360
+            lat[lat == lat.max()] += 1/360
+            lon[lon == lon.min()] -= (1/360) / np.cos(np.deg2rad(lat.mean()))
+            lon[lon == lon.max()] += (1/360) / np.cos(np.deg2rad(lat.mean()))
         except TypeError:
             lon, lat = aper.reference_point('sky')
             lon, lat = np.array([lon]), np.array([lat])
