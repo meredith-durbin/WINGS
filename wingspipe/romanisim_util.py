@@ -265,7 +265,7 @@ class PointWFI:
     
     def siaf_to_healpix(self, apername : str, h5_dir : Optional[str] = None, 
                         nside : int = 256,  inclusive : bool = True, 
-                        fact : int = 16, nest : bool = False, 
+                        fact : int = 32, nest : bool = False, 
                         galactic : bool = False, radius : float = 0.1,
                         ) -> np.typing.NDArray:
         '''Get HEALpix indices overlapping with specified SIAF aperture.
@@ -279,7 +279,7 @@ class PointWFI:
         inclusive : bool, default True
             Find all overlapping HEALPix or just those that directly intersect 
             the polygon edges?
-        fact : int, default 16
+        fact : int, default 32
             Factor to increase resolution by when evaluating HEALPix overlaps.
         nest : bool, default False
             Use nested HEALPix schema?
@@ -292,10 +292,6 @@ class PointWFI:
         aper = self.siaf[apername]
         try:
             lon, lat = aper.corners('sky')
-            lat[lat == lat.min()] -= 1/360
-            lat[lat == lat.max()] += 1/360
-            lon[lon == lon.min()] -= (1/360) / np.cos(np.deg2rad(lat.mean()))
-            lon[lon == lon.max()] += (1/360) / np.cos(np.deg2rad(lat.mean()))
         except TypeError:
             lon, lat = aper.reference_point('sky')
             lon, lat = np.array([lon]), np.array([lat])
@@ -309,14 +305,14 @@ class PointWFI:
                                    if (foo:=re.findall(r".*\.(\d+)\.h5", f.name))])
             hp_map = HealpixMap(None, all_healpix, density=True)
             vertices = ac.SkyCoord(lon, lat, unit='deg', frame=['icrs', 'galactic'][int(galactic)])
-            hplist = hp_map.uniq[hp_map.query_polygon(vertices.cartesian.xyz.T.value, inclusive=True)]
+            hplist = hp_map.uniq[hp_map.query_polygon(vertices.cartesian.xyz.T.value, inclusive=True, fact=fact)]
         else:
             if len(lon) == 1:
                 hplist = hpgeom.query_circle(nside, lon, lat, radius, inclusive=inclusive,
-                                            fact=fact, nest=nest, lonlat=True, degrees=True)
+                                             fact=fact, nest=nest, lonlat=True, degrees=True)
             else:
                 hplist = hpgeom.query_polygon(nside, lon, lat, inclusive=inclusive,
-                                            fact=fact, nest=nest, lonlat=True, degrees=True)
+                                              fact=fact, nest=nest, lonlat=True, degrees=True)
         return hplist
 
 def expand_dithers(row, auxfiles_dir='/home/mdurbin/pipelines/input_data/aux/',
