@@ -527,7 +527,7 @@ def calc_pix_area(wcs):
     jacobian = np.abs(dadx * dbdy - dady * dbdx)
     return jacobian
 
-def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
+def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True, add_dumo=True):
     '''Convert Roman L2 image datamodel asdf format to FITS.
     
     Inputs
@@ -547,6 +547,9 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True):
         key_map = json.load(f) 
     ny, nx = im.data.shape
     sip_header = im.meta.wcs.to_fits_sip(bounding_box=((-0.5, nx - 0.5), (-0.5, ny - 0.5)))
+    data = im.data.copy()
+    if add_dumo and hasattr(im, 'dumo'):
+        data = data + dumo
     hdu = fits.PrimaryHDU(header=sip_header, data=im.data.copy())
     hdu.header.set('EXTNAME', 'DATA')
     hdu.header.set('BUNIT', 'DN/s', 'Image units')
