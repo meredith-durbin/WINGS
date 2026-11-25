@@ -612,7 +612,7 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True, add_du
         # mask_bad = (im.dq & 1+8+1024) > 0
         unmasked = hdu.data[(im.dq == 0) & np.isfinite(hdu.data)]
         bad_val = min(np.abs(unmasked.min()) * -1.1, -100.)
-        sat_val = max(unmasked.max() * 1.1, 999999999999.)
+        sat_val = max(unmasked.max() * 1.1, 99999999999.)
         # hdu.data[mask_bad] = bad_val
         # hdu.data[mask_sat] = sat_val
         hdu.header.set('BADPIX', bad_val)
@@ -629,7 +629,7 @@ def asdf_to_fits(im, json_file, multiply_pam=True, multiply_exptime=True, add_du
 def make_l3(l2_list, product_name, asn_kwargs=dict(target='none'),
             configure_log=False, on_disk=True, save_results=True,
             flux_args=dict(),
-            skymatch_args=dict(lower=-100, upper=5000),
+            skymatch_args=dict(lower=-100, upper=1000, skymethod='global+match'),
             outlier_args=dict(),
             resample_args=dict(), 
             source_catalog_args=dict(skip=True)):
